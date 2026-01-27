@@ -26,7 +26,7 @@ Here are some examples of how to use the key functions in the package.
 To use the functions provided by the package, import it as follows:
 
 ```python
-import ravix as pr
+import ravix
 ```
 
 ### Getting Data
@@ -48,10 +48,10 @@ There are multiple datasets available from Ravix and are easily attained using t
 See [Applied Linear Regression for Business Analytics with Python](www.businessregression.com) for details regarding these datasets.  Sample import example:
 
 ```python
-import ravix as pr
+import ravix
 
 # Load data from ravix
-df = pr.get_data("Betas.csv")
+df = ravix.get_data("Betas.csv")
 
 # Format the data (for later)
 df.drop(columns = df.columns[0], inplace=True)
@@ -63,21 +63,20 @@ Ravix formula supports formula functionality similar to R. Fit a model with a fo
 
 ```python
 # Fit model with formula 
-model = pr.fit("SPY ~ .", df)
+model = ravix.ols("SPY ~ .", df)
 ```
 
 Summary types are specified using the `out` argument.  Different summaries are available including:
 
-* statsmodels (default)
+* simple (default)
+* statsmodels 
 * R
-* STATA
-* simple
 * ANOVA
 * coefficients (coef)
 
 ```python
 # Generate a model summary
-pr.summary(model)
+ravix.summary(model)
 ```
 
 ### Making Predictions
@@ -86,10 +85,10 @@ A Statsmodels object is created by default.  From this object, the predict funct
 
 ```python
 # Make predictions
-pr.predict(model, df)
+ravix.predict(model, df)
 
 # Produce fitted values
-pr.predict(model)
+ravix.predict(model)
 ```
 
 ### General Plotting
@@ -98,22 +97,22 @@ Plotting code is streamlined and built on top of Seaborn and MatPlotLib. Samples
 
 ```python
 # Generate a boxplot
-pr.boxplot("SPY ~ .", df)
+ravix.boxplot("SPY ~ .", df)
 
 # Generate a histogram
-pr.hist(df.SPY)
+ravix.hist(df.SPY)
 
 # Multiple histograms
-pr.hists("SPY ~ .",data = df)
+ravix.hists("SPY ~ .",data = df)
 
 # Scatter plot
-pr.plotXY("MSFT ~ SPY", data = df)
+ravix.plot("MSFT ~ SPY", data = df)
 
 # Multiple Scatter plots
-pr.plots("SPY ~ .", data = df)
+ravix.plot("SPY ~ .", data = df)
 
 # Correlation Plot
-pr.plot_cor(df)
+ravix.plot_cor(df)
 ```
 
 ### Required Fixes
