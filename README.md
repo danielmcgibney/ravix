@@ -1,6 +1,6 @@
-# PRegress
+# Ravix
 
-PRegress is a Python package for regression analysis and data visualization. It provides tools for model fitting, prediction, and various types of plots to help visualize your data particularly for regression analysis.
+Ravix is a Python package for regression analysis and data visualization. It provides tools for model fitting, prediction, and various types of plots to help visualize your data particularly for regression analysis.
 
 ## Features
 
@@ -14,7 +14,7 @@ PRegress is a Python package for regression analysis and data visualization. It 
 You can install the package using `pip`:
 
 ```sh
-pip install pregress
+pip install ravix
 ```
 
 ## Usage
@@ -26,12 +26,12 @@ Here are some examples of how to use the key functions in the package.
 To use the functions provided by the package, import it as follows:
 
 ```python
-import pregress as pr
+import ravix as pr
 ```
 
 ### Getting Data
 
-There are multiple datasets available from PRegress and are easily attained using the `get_data` function.  The datasets currently available are:
+There are multiple datasets available from Ravix and are easily attained using the `get_data` function.  The datasets currently available are:
 
 * AirBnb.csv
 * Betas.csv
@@ -48,9 +48,9 @@ There are multiple datasets available from PRegress and are easily attained usin
 See [Applied Linear Regression for Business Analytics with Python](www.businessregression.com) for details regarding these datasets.  Sample import example:
 
 ```python
-import pregress as pr
+import ravix as pr
 
-# Load data from PRegress
+# Load data from ravix
 df = pr.get_data("Betas.csv")
 
 # Format the data (for later)
@@ -59,7 +59,7 @@ df.drop(columns = df.columns[0], inplace=True)
 
 ### Model Fitting and Prediction
 
-PRegress formula supports formula functionality similar to R. Fit a model with a formula:
+Ravix formula supports formula functionality similar to R. Fit a model with a formula:
 
 ```python
 # Fit model with formula 
@@ -132,7 +132,7 @@ Based on current testing, the following fixes are required:
 
 ## Contributing
 
-We welcome contributions to PRegress! If you find a bug or have a feature request, please open an issue on [GitHub](https://github.com/danmcgib/PRegress). You can also contribute by:
+We welcome contributions to Ravix! If you find a bug or have a feature request, please open an issue on [GitHub](https://github.com/danmcgib/ravix). You can also contribute by:
 
 1. Forking the repository
 2. Creating a new branch (`git checkout -b feature-branch`)
@@ -146,4 +146,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgements
 
-We would like to thank all contributors and users of PRegress for their support and feedback.  Special thanks to Mintra Putlek!
+We would like to thank all contributors and users of Ravix for their support and feedback.

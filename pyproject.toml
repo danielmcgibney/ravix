@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ravix"
+version = "0.1.0"
+description = "Applied regression modeling and visualization for business analytics"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+authors = [
+    { name = "Daniel McGibney" }
+]
+
+keywords = [
+    "regression",
+    "ols",
+    "logistic regression",
+    "business analytics",
+    "statistics",
+    "education",
+    "formula"
+]
+
+dependencies = [
+    "numpy>=1.20",
+    "pandas>=1.4",
+    "statsmodels>=0.13",
+    "matplotlib>=3.5"
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Information Analysis"
+]
+
+[project.urls]
+Homepage = "https://github.com/danielmcgibney/ravix"
+Source = "https://github.com/danielmcgibney/ravix"
+Issues = "https://github.com/danielmcgibney/ravix/issues"
+
+[tool.setuptools]
+packages = ["ravix"]
+
+[tool.setuptools.package-data]
+ravix = ["data/*.csv"]
