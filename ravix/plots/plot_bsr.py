@@ -3,6 +3,7 @@ import seaborn as sns
 import pandas as pd
 import numpy as np
 from typing import Optional, Tuple
+from ravix.plots._theme import get_theme, _resolve_figsize
 
 def plot_bsr(
     model,
@@ -12,7 +13,7 @@ def plot_bsr(
     title: Optional[str] = None,
     xlab: Optional[str] = None,
     ylab: Optional[str] = None,
-    figsize: Tuple[float, float] = (10, 6),
+    figsize: Optional[Tuple[float, float]] = None,
     **kwargs
 ) -> None:
     """
@@ -92,6 +93,13 @@ def plot_bsr(
     - Heatmap cells are rectangular for better readability
     - Use annot=True in kwargs to show 1/0 values in heatmap cells
     """
+    # Resolve figsize and font sizes from theme
+    figsize = _resolve_figsize(figsize)
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
+
     # Validate model structure
     if not hasattr(model, "bsr") or not hasattr(model.bsr, "results") or \
        not hasattr(model.bsr, "best_by_k") or not hasattr(model.bsr, "metric"):
@@ -133,11 +141,12 @@ def plot_bsr(
         
         plt.plot(best_df["Num Predictors"], best_df[col], marker="o", **plot_kwargs)
 
-        plt.xlabel(xlab if xlab is not None else "Number of Predictors")
-        plt.ylabel(ylab if ylab is not None else col)
-        plt.title(title if title is not None else f"{col} by Number of Predictors")
+        plt.xlabel(xlab if xlab is not None else "Number of Predictors", fontsize=label_fontsize)
+        plt.ylabel(ylab if ylab is not None else col, fontsize=label_fontsize)
+        plt.title(title if title is not None else f"{col} by Number of Predictors", fontsize=title_fontsize)
         plt.xticks(np.arange(best_df["Num Predictors"].min(),
-                             best_df["Num Predictors"].max() + 1, step=1))
+                             best_df["Num Predictors"].max() + 1, step=1), fontsize=tick_fontsize)
+        plt.yticks(fontsize=tick_fontsize)
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.show()
@@ -157,15 +166,15 @@ def plot_bsr(
         
         bars = plt.bar(top["Num Predictors"], top[col], width=0.6, **bar_kwargs)
 
-        plt.xlabel(xlab if xlab is not None else "Number of Predictors")
-        plt.ylabel(ylab if ylab is not None else col)
-        plt.title(title if title is not None else f"Top {top_n} Best Models by {col}")
+        plt.xlabel(xlab if xlab is not None else "Number of Predictors", fontsize=label_fontsize)
+        plt.ylabel(ylab if ylab is not None else col, fontsize=label_fontsize)
+        plt.title(title if title is not None else f"Top {top_n} Best Models by {col}", fontsize=title_fontsize)
 
         min_val, max_val = top[col].min(), top[col].max()
         margin = (max_val - min_val) * 0.1 if max_val != min_val else 1
         plt.ylim(min_val - margin, max_val + margin)
-
-        plt.xticks(top["Num Predictors"])
+        plt.yticks(fontsize=tick_fontsize)
+        plt.xticks(top["Num Predictors"], fontsize=tick_fontsize)
         plt.grid(False)
         plt.tight_layout()
         plt.show()
@@ -228,14 +237,18 @@ def plot_bsr(
         
         ax = sns.heatmap(heatmap_df, **heatmap_kwargs)
         
-        # Rotate y-axis labels to be horizontal and increase font size
-        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=11)
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right', fontsize=11)
-        
         plt.title(title if title is not None else f"Top {top_n} Models by {col}", 
-                 fontsize=14, fontweight='bold')
-        plt.xlabel(xlab if xlab is not None else "Predictors", fontsize=12)
-        plt.ylabel(ylab if ylab is not None else col, fontsize=12)
+                 fontsize=title_fontsize, fontweight='bold')
+        plt.xlabel(xlab if xlab is not None else "Predictors", fontsize=label_fontsize)
+        plt.ylabel(ylab if ylab is not None else col, fontsize=label_fontsize)
+        # Set tick labels before tight_layout so rotated labels are included in spacing
+        for text in ax.get_xticklabels():
+            text.set_fontsize(tick_fontsize)
+            text.set_rotation(45)
+            text.set_ha('right')
+        for text in ax.get_yticklabels():
+            text.set_fontsize(tick_fontsize)
+            text.set_rotation(0)
         plt.tight_layout()
         plt.show()
         plt.clf()

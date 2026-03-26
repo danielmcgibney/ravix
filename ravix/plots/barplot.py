@@ -1,4 +1,5 @@
 from ravix.modeling.parse_formula import parse_formula
+from ravix.plots._theme import get_theme, _resolve_figsize
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -8,15 +9,13 @@ from typing import Optional, Union, List, Tuple
 def barplot(
     formula: Optional[str] = None, 
     data: Optional[pd.DataFrame] = None, 
-    color: Optional[Union[str, List[str]]] = None, 
-    xcolor: str = "blue", 
-    ycolor: str = "red", 
+    color: Optional[Union[str, List[str]]] = "blue",
     title: str = "Barplots of Variables", 
     xlab: str = "Variable", 
     ylab: str = "Value", 
     agg: Optional[str] = "mean", 
     horizontal: bool = False, 
-    figsize: Tuple[float, float] = (10, 6),
+    figsize: Optional[Tuple[float, float]] = None,
     **kwargs
 ) -> None:
     """
@@ -44,15 +43,9 @@ def barplot(
         DataFrame containing the variables. If formula is a DataFrame or array,
         it will be used as data and formula will be set to None.
     color : str or list, optional
-        Override for xcolor and ycolor:
+        Specify color fill:
         - str: Single color applied to all bars
         - list: Colors for each bar (cycles if fewer colors than bars)
-        Note: For categorical predictors (numeric ~ categorical), ycolor is 
-        ignored. Use color or xcolor to specify bar colors.
-    xcolor : str, default="blue"
-        Color for predictor variable bars. Ignored if `color` is specified.
-    ycolor : str, default="red"
-        Color for response variable bars. Ignored if `color` is specified.
     title : str, default="Barplots of Variables"
         Plot title.
     xlab : str, default="Variable"
@@ -113,17 +106,6 @@ def barplot(
     - When agg=None with single row/column numeric data, each value gets a bar
     - Color list cycles if fewer colors provided than bars needed
     """
-    # Handle color argument
-    color_list = None
-    if color is not None:
-        if isinstance(color, (list, tuple)):
-            # List of colors - save for later to create palette
-            color_list = color
-        else:
-            # Single color - use for both xcolor and ycolor
-            xcolor = color
-            ycolor = color
-    
     # Handle case where first argument is a DataFrame
     if isinstance(formula, pd.DataFrame):
         data = formula
@@ -153,6 +135,13 @@ def barplot(
     if agg not in valid_agg:
         raise ValueError(f"agg must be one of {valid_agg}")
     
+    # Resolve figsize and font sizes from theme
+    figsize = _resolve_figsize(figsize)
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
+
     # Create a new figure
     plt.figure(figsize=figsize)
     
@@ -168,15 +157,6 @@ def barplot(
                 if len(x_vars) == 1 and x_vars[0] in data.columns:
                     x_var = x_vars[0]
                     if data[x_var].dtype == 'object' or pd.api.types.is_categorical_dtype(data[x_var]):
-                        # Warn if ycolor is specified
-                        if color is None and ycolor != "red":
-                            import warnings
-                            warnings.warn(
-                                "ycolor is ignored for categorical predictor plots. "
-                                "Use 'color' argument to specify colors for the bars.",
-                                UserWarning
-                            )
-                        
                         # Case: Y ~ categorical variable
                         plot_df = pd.DataFrame({
                             y_var: data[y_var],
@@ -204,59 +184,44 @@ def barplot(
                                 plot_data = plot_df.groupby(x_var)[y_var].agg(agg).reset_index()
                             y_label = f"{agg.capitalize()} of {y_var}"
                         
+                        # Determine palette based on color argument
+                        if color is not None:
+                            if isinstance(color, list):
+                                n_categories = plot_data[x_var].nunique()
+                                if len(color) < n_categories:
+                                    # Cycle colors if not enough provided
+                                    palette = {cat: color[i % len(color)] 
+                                             for i, cat in enumerate(plot_data[x_var].unique())}
+                                else:
+                                    palette = {cat: color[i] 
+                                             for i, cat in enumerate(plot_data[x_var].unique())}
+                            else:
+                                # Single color for all categories
+                                categories = plot_data[x_var].unique()
+                                palette = {cat: color for cat in categories}
+                        
                         # Create bar plot with categories on x-axis
                         if horizontal:
-                            # Use color_list if provided, otherwise use appropriate color
-                            if color_list is not None:
-                                n_categories = plot_data[x_var].nunique()
-                                if len(color_list) < n_categories:
-                                    # Cycle colors if not enough provided
-                                    palette_to_use = {cat: color_list[i % len(color_list)] 
-                                                     for i, cat in enumerate(plot_data[x_var].unique())}
-                                else:
-                                    palette_to_use = {cat: color_list[i] 
-                                                     for i, cat in enumerate(plot_data[x_var].unique())}
+                            if color is not None:
                                 sns.barplot(y=x_var, x=y_var, data=plot_data, 
-                                           palette=palette_to_use, errorbar=None, **kwargs)
-                            elif xcolor != "blue":
-                                # Use xcolor if specified (not default)
-                                categories = plot_data[x_var].unique()
-                                palette_to_use = {cat: xcolor for cat in categories}
-                                sns.barplot(y=x_var, x=y_var, data=plot_data, 
-                                           palette=palette_to_use, errorbar=None, **kwargs)
+                                           palette=palette, errorbar=None, **kwargs)
                             else:
-                                # Default color
                                 sns.barplot(y=x_var, x=y_var, data=plot_data, 
-                                           color=ycolor, errorbar=None, **kwargs)
-                            plt.ylabel(x_var)
-                            plt.xlabel(y_label)
+                                           errorbar=None, **kwargs)
+                            plt.ylabel(x_var, fontsize=label_fontsize)
+                            plt.xlabel(y_label, fontsize=label_fontsize)
                         else:
-                            # Use color_list if provided, otherwise use appropriate color
-                            if color_list is not None:
-                                n_categories = plot_data[x_var].nunique()
-                                if len(color_list) < n_categories:
-                                    # Cycle colors if not enough provided
-                                    palette_to_use = {cat: color_list[i % len(color_list)] 
-                                                     for i, cat in enumerate(plot_data[x_var].unique())}
-                                else:
-                                    palette_to_use = {cat: color_list[i] 
-                                                     for i, cat in enumerate(plot_data[x_var].unique())}
+                            if color is not None:
                                 sns.barplot(x=x_var, y=y_var, data=plot_data, 
-                                           palette=palette_to_use, errorbar=None, **kwargs)
-                            elif xcolor != "blue":
-                                # Use xcolor if specified (not default)
-                                categories = plot_data[x_var].unique()
-                                palette_to_use = {cat: xcolor for cat in categories}
-                                sns.barplot(x=x_var, y=y_var, data=plot_data, 
-                                           palette=palette_to_use, errorbar=None, **kwargs)
+                                           palette=palette, errorbar=None, **kwargs)
                             else:
-                                # Default color
                                 sns.barplot(x=x_var, y=y_var, data=plot_data, 
-                                           color=ycolor, errorbar=None, **kwargs)
-                            plt.xlabel(x_var)
-                            plt.ylabel(y_label)
+                                           errorbar=None, **kwargs)
+                            plt.xlabel(x_var, fontsize=label_fontsize)
+                            plt.ylabel(y_label, fontsize=label_fontsize)
                         
-                        plt.title(title)
+                        plt.title(title, fontsize=title_fontsize)
+                        plt.tick_params(labelsize=tick_fontsize)
                         plt.tight_layout()
                         plt.show()
                         plt.clf()
@@ -266,10 +231,13 @@ def barplot(
         # If we get here, use parse_formula for numeric variables
         formula_with_intercept = formula + "+0"
         Y_out, X_out = parse_formula(formula_with_intercept, data)
-        Y_name, X_names = Y_out.name, X_out.columns
         
         # Combine Y and X data for bar plots
-        plot_data = pd.concat([pd.Series(Y_out, name=Y_name), X_out], axis=1)
+        if Y_out is not None:
+            Y_series = pd.Series(Y_out, name=Y_out.name)
+            plot_data = pd.concat([Y_series, X_out], axis=1)
+        else:
+            plot_data = X_out
         
         # Apply aggregation
         if agg is None:
@@ -288,27 +256,34 @@ def barplot(
                 'Value': list(agg_values.values())
             })
         
-        # Create a color mapping for columns
-        # Use actual variables from melted data to ensure all keys are present
+        # Determine palette based on color argument
         all_vars = plot_data_melted['Variable'].unique()
-        palette = {Y_name: ycolor}
-        palette.update({x: xcolor for x in X_names})
-        
-        # Override with color_list if provided
-        if color_list is not None:
-            palette = {all_vars[i]: color_list[i % len(color_list)] for i in range(len(all_vars))}
+        if color is not None:
+            if isinstance(color, list):
+                palette = {all_vars[i]: color[i % len(color)] for i in range(len(all_vars))}
+            else:
+                # Single color for all bars
+                palette = {var: color for var in all_vars}
         
         # Create the bar plot
         if horizontal:
-            sns.barplot(y='Variable', x='Value', data=plot_data_melted, hue='Variable', 
-                       dodge=False, palette=palette, errorbar=None, legend=False, **kwargs)
-            plt.xlabel(ylab if agg is None else f"{agg.capitalize()} {ylab}")
-            plt.ylabel(xlab)
+            if color is not None:
+                sns.barplot(y='Variable', x='Value', data=plot_data_melted, hue='Variable', 
+                           dodge=False, palette=palette, errorbar=None, legend=False, **kwargs)
+            else:
+                sns.barplot(y='Variable', x='Value', data=plot_data_melted, hue='Variable', 
+                           dodge=False, errorbar=None, legend=False, **kwargs)
+            plt.xlabel(ylab if (agg is None or ylab != "Value") else f"{agg.capitalize()} {ylab}", fontsize=label_fontsize)
+            plt.ylabel(xlab, fontsize=label_fontsize)
         else:
-            sns.barplot(x='Variable', y='Value', data=plot_data_melted, hue='Variable', 
-                       dodge=False, palette=palette, errorbar=None, legend=False, **kwargs)
-            plt.ylabel(ylab if agg is None else f"{agg.capitalize()} {ylab}")
-            plt.xlabel(xlab)
+            if color is not None:
+                sns.barplot(x='Variable', y='Value', data=plot_data_melted, hue='Variable', 
+                           dodge=False, palette=palette, errorbar=None, legend=False, **kwargs)
+            else:
+                sns.barplot(x='Variable', y='Value', data=plot_data_melted, hue='Variable', 
+                           dodge=False, errorbar=None, legend=False, **kwargs)
+            plt.ylabel(ylab if (agg is None or ylab != "Value") else f"{agg.capitalize()} {ylab}", fontsize=label_fontsize)
+            plt.xlabel(xlab, fontsize=label_fontsize)
     
     else:
         # Case: No formula provided, use all numeric variables in the data
@@ -339,27 +314,37 @@ def barplot(
                 'Value': list(agg_values.values())
             })
         
-        # Create a single color mapping for all variables
-        palette = {var: xcolor for var in plot_data_melted['Variable'].unique()}
-        
-        # Override with color_list if provided
-        if color_list is not None:
-            vars_in_order = plot_data_melted['Variable'].unique()
-            palette = {vars_in_order[i]: color_list[i % len(color_list)] for i in range(len(vars_in_order))}
+        # Determine palette based on color argument
+        vars_in_order = plot_data_melted['Variable'].unique()
+        if color is not None:
+            if isinstance(color, list):
+                palette = {vars_in_order[i]: color[i % len(color)] for i in range(len(vars_in_order))}
+            else:
+                # Single color for all variables
+                palette = {var: color for var in vars_in_order}
         
         # Create the bar plot
         if horizontal:
-            sns.barplot(y='Variable', x='Value', data=plot_data_melted, hue='Variable', 
-                       dodge=False, palette=palette, errorbar=None, legend=False, **kwargs)
-            plt.xlabel(ylab if agg is None else f"{agg.capitalize()} {ylab}")
-            plt.ylabel(xlab)
+            if color is not None:
+                sns.barplot(y='Variable', x='Value', data=plot_data_melted, hue='Variable', 
+                           dodge=False, palette=palette, errorbar=None, legend=False, **kwargs)
+            else:
+                sns.barplot(y='Variable', x='Value', data=plot_data_melted, hue='Variable', 
+                           dodge=False, errorbar=None, legend=False, **kwargs)
+            plt.xlabel(ylab if (agg is None or ylab != "Value") else f"{agg.capitalize()} {ylab}", fontsize=label_fontsize)
+            plt.ylabel(xlab, fontsize=label_fontsize)
         else:
-            sns.barplot(x='Variable', y='Value', data=plot_data_melted, hue='Variable', 
-                       dodge=False, palette=palette, errorbar=None, legend=False, **kwargs)
-            plt.ylabel(ylab if agg is None else f"{agg.capitalize()} {ylab}")
-            plt.xlabel(xlab)
+            if color is not None:
+                sns.barplot(x='Variable', y='Value', data=plot_data_melted, hue='Variable', 
+                           dodge=False, palette=palette, errorbar=None, legend=False, **kwargs)
+            else:
+                sns.barplot(x='Variable', y='Value', data=plot_data_melted, hue='Variable', 
+                           dodge=False, errorbar=None, legend=False, **kwargs)
+            plt.ylabel(ylab if (agg is None or ylab != "Value") else f"{agg.capitalize()} {ylab}", fontsize=label_fontsize)
+            plt.xlabel(xlab, fontsize=label_fontsize)
     
-    plt.title(title)
+    plt.title(title, fontsize=title_fontsize)
+    plt.tick_params(labelsize=tick_fontsize)
     plt.tight_layout()
     plt.show()
     plt.clf()

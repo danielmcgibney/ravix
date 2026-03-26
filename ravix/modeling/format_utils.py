@@ -4,8 +4,11 @@ import pandas as pd
 
 def format_sigfigs(x, sigfigs=6):
     """Format a number to a specified number of significant figures."""
-    if pd.isna(x) or x == 0:
-        return f"{x:>12.6f}"
+    if pd.isna(x):
+        return ''
+    
+    if x == 0:
+        return '0'
     
     # Calculate the order of magnitude
     magnitude = int(np.floor(np.log10(abs(x))))
@@ -16,8 +19,14 @@ def format_sigfigs(x, sigfigs=6):
     # Ensure we don't have negative decimals for very large numbers
     decimals = max(0, decimals)
     
-    # Format with the calculated decimals
-    return f"{x:>12.{decimals}f}"
+    # Format with the calculated decimals (no fixed width padding)
+    result = f"{x:.{decimals}f}"
+    
+    # Strip trailing zeros after decimal point
+    if '.' in result:
+        result = result.rstrip('0').rstrip('.')
+    
+    return result
 
 
 def format_r_style(x):

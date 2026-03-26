@@ -31,7 +31,7 @@ def predict(model, newX=None):
     model_columns = model.model.exog_names
 
     # Step 4: Reconstruct the formula from model columns
-    formula = model.fit.formula
+    formula = model.formula
     
     # Extract the response variable name from the formula
     response_name = formula.split('~')[0].strip()

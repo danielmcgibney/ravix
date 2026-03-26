@@ -1,4 +1,5 @@
 from ravix.modeling.parse_formula import parse_formula
+from ravix.plots._theme import get_theme, _resolve_figsize
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -8,13 +9,11 @@ from typing import Optional, Union, List, Tuple
 def boxplot(
     formula: Optional[str] = None, 
     data: Optional[pd.DataFrame] = None, 
-    xcolor: str = "blue", 
-    ycolor: str = "red", 
-    color: Optional[Union[str, List[str]]] = None,
+    color: Optional[Union[str, List[str]]] = "blue",
     title: str = "Boxplots of Variables",
     xlab: str = "Variable",
     ylab: str = "Value",
-    figsize: Tuple[float, float] = (10, 6),
+    figsize: Optional[Tuple[float, float]] = None,
     **kwargs
 ) -> None:
     """
@@ -33,24 +32,19 @@ def boxplot(
     data : pd.DataFrame, optional
         DataFrame containing the variables. If formula is a DataFrame, 
         it will be used as data and formula will be set to None.
-    xcolor : str, default="blue"
-        Color for predictor variable boxplots. Ignored if `color` is specified.
-    ycolor : str, default="red"
-        Color for response variable boxplot. Ignored if `color` is specified.
     color : str or list, optional
-        Override for xcolor and ycolor:
+        Specify color fill:
         - str: Single color applied to all boxplots
         - list: Colors for each boxplot (length must match number of boxes)
-        Note: For categorical predictors (numeric ~ categorical), ycolor is 
-        ignored. Use color or xcolor to specify box colors.
+        Note: For categorical predictors (numeric ~ categorical).
     title : str, default="Boxplots of Variables"
         Plot title.
     xlab : str, default="Variable"
         X-axis label.
     ylab : str, default="Value"
         Y-axis label.
-    figsize : tuple, default=(10, 6)
-        Figure size as (width, height) in inches.
+    figsize : tuple, default=None
+        Figure size as (width, height) in inches. Defaults to active theme.
     **kwargs : dict
         Additional keyword arguments passed to seaborn.boxplot().
     
@@ -76,20 +70,26 @@ def boxplot(
     - For numeric predictors, side-by-side boxplots are created
     - The function automatically handles categorical encoding from parse_formula
     """
-    if isinstance(formula, pd.DataFrame):
-        data = formula
+    # Resolve figsize and font sizes from theme
+    figsize = _resolve_figsize(figsize)
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
+
+    if not isinstance(formula, str) and formula is not None:
+        data = pd.DataFrame(formula)
         formula = None
     
     if formula is not None:
         # Parse the original formula to get variable names before transformation
         original_formula = formula
-        # Internally appends "+0"" to avoid including an intercept term in the plotted variables.
+        # Internally appends "+0" to avoid including an intercept term in the plotted variables.
         formula = formula + "+0"
         Y_out, X_out = parse_formula(formula, data)
-        Y_name = Y_out.name
+        Y_name = Y_out.name if Y_out is not None else None
         
         # Extract the original predictor variable name from the formula
-        # This handles the case where parse_formula transforms categorical variables
         original_x_var = original_formula.split('~')[1].strip().split('+')[0].strip()
         
         # Check if we have a single categorical predictor (special case)
@@ -103,45 +103,25 @@ def boxplot(
                 original_x_var: data[original_x_var]
             })
             
-            # Warn if ycolor is specified
-            if color is None and ycolor != "red":
-                import warnings
-                warnings.warn(
-                    "ycolor is ignored for categorical predictor plots. "
-                    "Use 'color' argument to specify colors for the boxes.",
-                    UserWarning
-                )
-            
             # Determine color/palette for this special case
             if color is not None:
                 if isinstance(color, str):
-                    # Single color for all boxes - need to create palette dict
                     categories = plot_data[original_x_var].unique()
                     palette = {cat: color for cat in categories}
                 elif isinstance(color, list):
-                    # Number of boxes = number of unique categories
                     n_categories = plot_data[original_x_var].nunique()
                     if len(color) != n_categories:
                         raise ValueError(f"Length of color vector ({len(color)}) must match number of boxplots ({n_categories})")
-                    # Create palette mapping categories to colors (use actual category values, not strings)
                     categories = sorted(plot_data[original_x_var].unique())
                     palette = {cat: color[i] for i, cat in enumerate(categories)}
-            elif xcolor != "blue":
-                # Use xcolor if specified (not default) - need to create palette dict
-                categories = plot_data[original_x_var].unique()
-                palette = {cat: xcolor for cat in categories}
-            else:
-                # Default color - need to create palette dict
-                categories = plot_data[original_x_var].unique()
-                palette = {cat: "blue" for cat in categories}
-            
+
             plt.figure(figsize=figsize)
-            # Fix for FutureWarning: assign x variable to hue and set legend=False
             sns.boxplot(x=original_x_var, y=Y_name, hue=original_x_var, 
                        data=plot_data, palette=palette, legend=False, **kwargs)
-            plt.title(title)
-            plt.xlabel(xlab if xlab != "Variable" else original_x_var)
-            plt.ylabel(ylab if ylab != "Value" else Y_name)
+            plt.title(title, fontsize=title_fontsize)
+            plt.xlabel(xlab if xlab != "Variable" else original_x_var, fontsize=label_fontsize)
+            plt.ylabel(ylab if ylab != "Value" else Y_name, fontsize=label_fontsize)
+            plt.tick_params(labelsize=tick_fontsize)
             plt.tight_layout()
             plt.show()
             plt.clf()
@@ -149,65 +129,50 @@ def boxplot(
             return
         
         # Otherwise, proceed with normal case: multiple numeric predictors
-        # Filter out intercept and non-numeric columns from X_out
         if hasattr(X_out, 'columns'):
             numeric_predictors = X_out.select_dtypes(include=[np.number])
-            # Remove intercept columns
             numeric_predictors = numeric_predictors.drop(['Intercept', 'const'], axis=1, errors='ignore')
         else:
             numeric_predictors = X_out
         
-        # Combine Y and numeric predictors
-        if isinstance(Y_out, pd.Series):
-            plot_data = pd.concat([Y_out, numeric_predictors], axis=1)
+        if Y_out is not None:
+            Y_series = Y_out if isinstance(Y_out, pd.Series) else pd.Series(Y_out, name=Y_name)
+            plot_data = pd.concat([Y_series, numeric_predictors], axis=1)
         else:
-            plot_data = pd.concat([pd.Series(Y_out, name=Y_name), numeric_predictors], axis=1)
-        
+            plot_data = numeric_predictors  
+            
         plot_data_melted = plot_data.melt(var_name='Variable', value_name='Value')
         
-        # Determine palette based on color argument
         if color is not None:
             if isinstance(color, list):
-                # Vector of colors - must match number of variables
                 n_vars = len(plot_data.columns)
                 if len(color) != n_vars:
                     raise ValueError(f"Length of color vector ({len(color)}) must match number of boxplots ({n_vars})")
                 palette = {col: color[i] for i, col in enumerate(plot_data.columns)}
             else:
-                # Single color for all
                 palette = {col: color for col in plot_data.columns}
-        else:
-            # Use xcolor and ycolor
-            palette = {Y_name: ycolor}
-            palette.update({col: xcolor for col in numeric_predictors.columns})
+
     else:
         # No formula provided, use all numeric columns
         plot_data = data.select_dtypes(include=[np.number])
         plot_data_melted = plot_data.melt(var_name='Variable', value_name='Value')
         
-        # Determine palette based on color argument
         if color is not None:
             if isinstance(color, list):
-                # Vector of colors - must match number of variables
                 n_vars = len(plot_data.columns)
                 if len(color) != n_vars:
                     raise ValueError(f"Length of color vector ({len(color)}) must match number of boxplots ({n_vars})")
                 palette = {col: color[i] for i, col in enumerate(plot_data.columns)}
             else:
-                # Single color for all
                 palette = {col: color for col in plot_data.columns}
-        else:
-            # Use xcolor for all variables
-            palette = {var: xcolor for var in plot_data_melted['Variable'].unique()}
-    
+
     plt.figure(figsize=figsize)
-    
-    # Fix for the FutureWarning: assign x variable to hue and set legend=False
     sns.boxplot(x='Variable', y='Value', hue='Variable', data=plot_data_melted, 
                 palette=palette, legend=False, dodge=False, **kwargs)
-    plt.title(title)
-    plt.xlabel(xlab)
-    plt.ylabel(ylab)
+    plt.title(title, fontsize=title_fontsize)
+    plt.xlabel(xlab, fontsize=label_fontsize)
+    plt.ylabel(ylab, fontsize=label_fontsize)
+    plt.tick_params(labelsize=tick_fontsize)
     plt.tight_layout()
     plt.show()
     plt.clf()

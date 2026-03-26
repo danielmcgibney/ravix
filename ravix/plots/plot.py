@@ -9,11 +9,10 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 from ravix.modeling.parse_formula import parse_formula
+from ravix.plots._theme import get_theme, _resolve_figsize
 from ravix.plots._utils import (
     _ensure_no_intercept,
     _coerce_color_str,
-    _normalize_models,
-    _normalize_line_colors,
     _all_color_like,
     _get_residuals,
     _detect_model_type,
@@ -26,9 +25,7 @@ from ravix.plots._utils import (
 def plot(
     input_data: Union[pd.DataFrame, str, Any],
     data: Optional[pd.DataFrame] = None,
-    model: Optional[Union[Any, List[Any]]] = None,
     color: Union[str, List[Any], np.ndarray] = "blue",
-    lcolor: Union[str, List[str]] = "red",
     lines: bool = False,
     smooth: bool = True,
     res: str = "resid",
@@ -37,13 +34,14 @@ def plot(
     ylab: Optional[str] = None,
     psize: int = 50,
     alpha: float = 1.0,
-    figsize: Tuple[float, float] = (10, 6),
+    figsize: Optional[Tuple[float, float]] = None,
     show: bool = True,
+    diag: str = "label",
     **kwargs
 ) -> Optional[Tuple[plt.Figure, plt.Axes]]:
     """
     Unified scatter-based plotting interface for:
-      - Single X–Y scatter with optional regression/model lines
+      - Single X–Y scatter plots
       - Scatter plot matrix (pairplot) for multiple variables
       - Residual diagnostic plot for fitted models
 
@@ -53,12 +51,8 @@ def plot(
         Formula string (e.g., "Y ~ X"), DataFrame, or fitted model
     data : Optional[pd.DataFrame], default=None
         Data for formula evaluation
-    model : Optional[Union[Any, List[Any]]], default=None
-        Fitted model(s) or "line"/"l" for regression line
     color : Union[str, List[Any], np.ndarray], default="blue"
         Point color(s) - string, color array, or category labels
-    lcolor : Union[str, List[str]], default="red"
-        Line color(s) for model predictions
     lines : bool, default=False
         Add regression lines in scatter plot matrix
     smooth : bool, default=True
@@ -79,6 +73,11 @@ def plot(
         Figure dimensions
     show : bool, default=True
         Display plot immediately; if False, return (fig, ax) for manual control
+    diag : str, default="label"
+        Diagonal panel content for scatter plot matrix:
+        "label"   – large variable name displayed as text (default)
+        "hist"    – histogram of each variable
+        "density" – kernel density estimate
 
     Returns
     -------
@@ -90,11 +89,13 @@ def plot(
 
     Examples
     --------
-    >>> # Simple scatter with regression line
-    >>> plot("mpg ~ hp", data=mtcars, model="line")
+    >>> # Simple scatter plot
+    >>> plot("mpg ~ hp", data=mtcars)
     
-    >>> # Multiple models with custom colors
-    >>> plot("y ~ x", data=df, model=[model1, model2], lcolor=["red", "blue"])
+    >>> # Add regression line using abline
+    >>> plot("mpg ~ hp", data=mtcars, show=False)
+    >>> abline(fitted_model)
+    >>> plt.show()
     
     >>> # Residual diagnostics
     >>> fitted_model = fit("y ~ x", data=df)
@@ -121,6 +122,7 @@ def plot(
     - For multi-column DataFrames (scatter matrix): columns should be ordered as predictors then response (X1, X2, ..., Y)
     - Formula strings can be parsed with data=None if your parse_formula supports
       environment lookup, but providing data is recommended.
+    - Use abline() to add regression lines to scatter plots in a layered fashion
     """
     # Better guidance for unsupported inputs
     # Allow arrays/Series that have .resid (duck-typed fitted models)
@@ -134,6 +136,9 @@ def plot(
             "  - hist(series_or_array) for distributions"
         )
 
+    # Resolve figsize via theme (once, before dispatching to sub-functions)
+    figsize = _resolve_figsize(figsize)
+
     # Normalize res parameter once at entry (this is the only entry point to _plot_res)
     res_normalized = str(res).lower().strip()
 
@@ -143,7 +148,6 @@ def plot(
             input_data,
             res=res_normalized,
             color=_coerce_color_str(color, default="blue"),
-            lcolor=_coerce_color_str(lcolor, default="red"),
             title=title if title else "Residual Plot",
             xlab=xlab if xlab else "Fitted values",
             ylab=ylab if ylab else "Residuals",
@@ -161,9 +165,7 @@ def plot(
         if input_data.shape[1] == 2:
             return _plot_xy(
                 input_data,
-                model=model,
                 color=color,
-                lcolor=lcolor,
                 xlab=xlab,
                 ylab=ylab,
                 title=title,
@@ -178,9 +180,9 @@ def plot(
             input_data,
             color=_coerce_color_str(color, default="blue"),
             lines=lines,
-            lcolor=_coerce_color_str(lcolor, default="black"),
             title=title if title else "Scatter Plot Matrix",
             figsize=figsize,
+            diag=diag,
             **kwargs,
         )
         return None
@@ -201,21 +203,27 @@ def plot(
         if getattr(X_out, "shape", (0, 0))[1] == 0:
             raise ValueError("Formula must be of the form 'Y ~ X' or 'Y ~ X1 + X2'.")
 
+        if Y_out is None:
+            # No LHS (e.g. "~ X1 + X2") — treat all RHS columns as the variables to plot
+            _plots(
+                X_out,
+                color=_coerce_color_str(color, default="blue"),
+                lines=lines,
+                title=title if title else "Scatter Plot Matrix",
+                figsize=figsize,
+                diag=diag,
+                **kwargs,
+            )
+            return None
+
         if X_out.shape[1] == 1:
-            # Pass parsed data to avoid re-parsing
-            # _plot_xy expects (X, Y) order
-            # Preserve index alignment from original data
-            y_name = getattr(Y_out, "name", "Y")
+            y_name = Y_out.name if isinstance(Y_out, pd.Series) else "Y"
             x_name = X_out.columns[0]
-            plot_data = pd.DataFrame({
-                x_name: X_out.iloc[:, 0],
-                y_name: pd.Series(np.asarray(Y_out).ravel(), index=X_out.index)
-            })
+            Y_series = Y_out if isinstance(Y_out, pd.Series) else pd.Series(Y_out, name=y_name, index=X_out.index)
+            plot_data = pd.DataFrame({x_name: X_out.iloc[:, 0], y_name: Y_series})
             return _plot_xy(
                 plot_data,
-                model=model,
                 color=color,
-                lcolor=lcolor,
                 xlab=xlab,
                 ylab=ylab,
                 title=title,
@@ -226,21 +234,16 @@ def plot(
                 **kwargs,
             )
 
-        # Pass parsed data to avoid re-parsing
-        # Build as X columns + Y column for consistent ordering
-        # Preserve index alignment from original data
-        y_name = getattr(Y_out, "name", "Y")
-        plot_data = pd.concat(
-            [X_out, pd.Series(np.asarray(Y_out).ravel(), index=X_out.index, name=y_name)],
-            axis=1
-        )
+        y_name = Y_out.name if isinstance(Y_out, pd.Series) else "Y"
+        Y_series = Y_out if isinstance(Y_out, pd.Series) else pd.Series(Y_out, name=y_name, index=X_out.index)
+        plot_data = pd.concat([Y_series, X_out], axis=1)
         _plots(
             plot_data,
             color=_coerce_color_str(color, default="blue"),
             lines=lines,
-            lcolor=_coerce_color_str(lcolor, default="black"),
             title=title if title else "Scatter Plot Matrix",
             figsize=figsize,
+            diag=diag,
             **kwargs,
         )
         return None
@@ -254,9 +257,7 @@ def plot(
 
 def _plot_xy(
     data: pd.DataFrame,
-    model: Optional[Union[Any, List[Any]]] = None,
     color: Union[str, List[Any], np.ndarray] = "blue",
-    lcolor: Union[str, List[str]] = "red",
     xlab: Optional[str] = None,
     ylab: Optional[str] = None,
     title: Optional[str] = None,
@@ -267,17 +268,20 @@ def _plot_xy(
     **kwargs
 ) -> Optional[Tuple[plt.Figure, plt.Axes]]:
     """
-    Single predictor scatter plot with optional regression/model line(s).
+    Single predictor scatter plot (data only, no regression lines).
 
     Expects a 2-column DataFrame (X first, Y second).
+    Use abline() to add regression lines after plotting.
       
     Examples
     --------
     >>> # DataFrame input
     >>> _plot_xy(df[["size", "price"]])
     
-    >>> # With fitted model line
-    >>> _plot_xy(plot_data, model=fitted_model, lcolor="green")
+    >>> # With layered regression line
+    >>> _plot_xy(plot_data, show=False)
+    >>> abline(fitted_model)
+    >>> plt.show()
     
     >>> # Categorical colors
     >>> _plot_xy(plot_data, color=df["category"])
@@ -285,14 +289,16 @@ def _plot_xy(
     if data.shape[1] != 2:
         raise ValueError("_plot_xy expects a DataFrame with exactly 2 columns (X, Y).")
     
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
+
     cols = data.columns.tolist()
     X_out = data[[cols[0]]]
     Y_out = data[cols[1]]
 
-    models = _normalize_models(model)               # [] not [None]
-    lcolors = _normalize_line_colors(lcolor, n=len(models))
-    
-    # Get actual column name and base variable name for labels
+    # Get actual column name for labels
     x_colname = X_out.columns[0]
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -302,7 +308,7 @@ def _plot_xy(
     _scatter_xy(
         ax,
         X_out.values.flatten(),
-        Y_out,  # Keep as pandas Series if that's what it is
+        Y_out,
         color=color,
         psize=psize,
         alpha=alpha,
@@ -310,79 +316,22 @@ def _plot_xy(
         **kwargs,
     )
 
-    # Plot lines (models)
-    for idx, (mdl, line_color) in enumerate(zip(models, lcolors)):
-        label = None
-        if isinstance(legend_labels, list) and idx < len(legend_labels):
-            label = legend_labels[idx]
-
-        if isinstance(mdl, str) and mdl.lower() in ["line", "l"]:
-            sns.regplot(
-                x=X_out.values.flatten(),
-                y=Y_out,  # Pass Series directly
-                scatter=False,
-                ci=None,
-                line_kws={"color": line_color, "label": label},
-                ax=ax,
-            )
-            continue
-
-        if mdl is not None:
-            # Check for finite values before computing range
-            x_vals = X_out.values.ravel()
-            if not np.any(np.isfinite(x_vals)):
-                warnings.warn(
-                    f"Model {idx + 1}: All X values are NaN/Inf. Skipping prediction line.",
-                    UserWarning,
-                    stacklevel=2
-                )
-                continue
-                
-            x_min = float(np.nanmin(x_vals))
-            x_max = float(np.nanmax(x_vals))
-            
-            # Check for degenerate range (all X values are the same)
-            if x_min == x_max:
-                warnings.warn(
-                    f"Model {idx + 1}: All X values are identical. Skipping prediction line.",
-                    UserWarning,
-                    stacklevel=2
-                )
-                continue
-                
-            X_range = np.linspace(x_min, x_max, 100).reshape(-1, 1)
-
-            try:
-                # Import predict locally (only needed here)
-                from ravix.modeling.predict import predict
-                
-                # Use actual column name for prediction (e.g., "log(price)" not "price")
-                X_pred = pd.DataFrame({x_colname: X_range.flatten()})
-                Y_pred = predict(mdl, X_pred)
-            except Exception as e:
-                warnings.warn(
-                    f"Could not generate predictions for model {idx + 1}: {e}",
-                    UserWarning,
-                    stacklevel=2  # IMPROVEMENT: Better stack level
-                )
-                continue
-
-            pred_df = pd.DataFrame({"X": X_range.flatten(), "Y": np.asarray(Y_pred).ravel()})
-            sns.lineplot(data=pred_df, x="X", y="Y", color=line_color, lw=2, label=label, ax=ax)
-
-    ax.set_xlabel(xlab if xlab is not None else x_colname)
-    ax.set_ylabel(ylab if ylab is not None else getattr(Y_out, "name", "Y"))
+    ax.set_xlabel(xlab if xlab is not None else x_colname, fontsize=label_fontsize)
+    ax.set_ylabel(ylab if ylab is not None else getattr(Y_out, "name", "Y"), fontsize=label_fontsize)
     if title is not None:
-        ax.set_title(title)
+        ax.set_title(title, fontsize=title_fontsize)
+    ax.tick_params(labelsize=tick_fontsize)
 
     # Only show legend if something labeled exists
     if ax.get_legend_handles_labels()[1]:
         ax.legend()
+    
+    # Store X variable name in axes metadata for abline() to use
+    ax._ravix_x_var = x_colname
 
     plt.tight_layout()
     if show:
-        plt.show()
-        plt.close(fig)
+        pass
         return None
     return fig, ax
 
@@ -466,70 +415,166 @@ def _plots(
     data: pd.DataFrame,
     color: str = "blue",
     lines: bool = False,
-    lcolor: str = "black",
     title: str = "Scatter Plot Matrix",
     figsize: Optional[Tuple[float, float]] = None,
+    diag: str = "label",
     **kwargs
 ) -> None:
     """
-    Scatter plot matrix using seaborn.pairplot.
+    Scatter plot matrix with full control over diagonal panels and typography.
 
-    - Uses a single color consistently (no post-hoc recoloring).
-    - If lines=True, adds regression lines without double-plotting points.
-    - Defaults diag_kind to "hist" for stability with discrete columns.
-    - Recommended column order: predictor columns followed by response column (X1, X2, ..., Y)
-    
+    Parameters
+    ----------
+    data : pd.DataFrame
+        DataFrame whose columns are the variables to plot.
+    color : str, default="blue"
+        Point and histogram/density color.
+    lines : bool, default=False
+        Overlay OLS regression lines on off-diagonal scatter panels.
+    title : str, default="Scatter Plot Matrix"
+        Figure suptitle.
+    figsize : Optional[Tuple[float, float]], default=None
+        Overall figure size; auto-computed from n columns if None.
+    diag : str, default="label"
+        Diagonal panel content:
+        "label"   – large, bold variable name centred in the panel (default)
+        "hist"    – histogram of each variable
+        "density" – kernel density estimate
+
     Examples
     --------
-    >>> # Basic pairplot
     >>> _plots(df[["x1", "x2", "y"]])
-    
-    >>> # With regression lines
-    >>> _plots(plot_data, lines=True, lcolor="red")
-    
-    >>> # Custom styling
-    >>> _plots(df, color="darkblue", figsize=(12, 12))
+    >>> _plots(plot_data, lines=True, diag="hist")
+    >>> _plots(df, color="darkblue", diag="density", figsize=(12, 12))
     """
+    diag = str(diag).lower().strip()
+    if diag not in ("label", "hist", "density"):
+        raise ValueError("`diag` must be one of 'label', 'hist', or 'density'.")
+
     if data.shape[1] < 2:
         raise ValueError("Need at least 2 columns for a scatter plot matrix.")
 
-    plot_data = data
+    cols = data.columns.tolist()
+    n = len(cols)
 
-    pair_kwargs = dict(kwargs)
-    if figsize is not None:
-        n = plot_data.shape[1]
-        pair_kwargs.setdefault("height", max(2.0, figsize[1] / n))
-        pair_kwargs.setdefault("aspect", max(0.8, figsize[0] / figsize[1]))
+    # ── figure sizing ──────────────────────────────────────────────────────
+    if figsize is None:
+        # Use theme figsize as base, then scale by n; fall back to rc default
+        theme_base = get_theme().get("figsize") or plt.rcParams["figure.figsize"]
+        cell = max(2.2, theme_base[0] / n)
+        figsize = (cell * n, cell * n)
 
-    pair_kwargs.setdefault("plot_kws", {})
-    pair_kwargs["plot_kws"].setdefault("color", color)
+    fig, axes = plt.subplots(n, n, figsize=figsize)
+    if n == 1:
+        axes = np.array([[axes]])
 
-    # diag hist is more robust than kde for discrete / near-constant cols
-    pair_kwargs.setdefault("diag_kws", {})
-    pair_kwargs["diag_kws"].setdefault("color", color)
+    # ── shared tick / font settings ─────────────────────────────────────────
+    _theme = get_theme()
+    TICK_FONTSIZE  = _theme["tick_fontsize"]
+    DIAG_FONTSIZE  = _theme["diag_fontsize"]
+    TITLE_FONTSIZE = _theme["title_fontsize"]
 
-    g = sns.pairplot(plot_data, diag_kind="hist", **pair_kwargs)
-    plt.suptitle(title, fontsize=16, y=1.02)
+    # ── strip kwargs that only make sense for seaborn pairplot ─────────────
+    _scatter_kw = {k: v for k, v in kwargs.items()
+                   if k not in ("height", "aspect", "plot_kws", "diag_kws")}
 
-    if lines:
-        for i in range(len(plot_data.columns)):
-            for j in range(len(plot_data.columns)):
-                if i == j:
-                    continue
-                sns.regplot(
-                    x=plot_data.columns[j],
-                    y=plot_data.columns[i],
-                    data=plot_data,
-                    ax=g.axes[i, j],
-                    scatter=False,
-                    ci=None,
-                    line_kws={"color": lcolor, "linewidth": 1.5},
-                    truncate=False,
+    for i in range(n):
+        for j in range(n):
+            ax = axes[i, j]
+            col_i = cols[i]   # row variable  → y-axis
+            col_j = cols[j]   # column variable → x-axis
+
+            # ── diagonal ──────────────────────────────────────────────────
+            if i == j:
+                if diag == "label":
+                    ax.set_axis_off()
+                    ax.text(
+                        0.5, 0.5, col_i,
+                        transform=ax.transAxes,
+                        ha="center", va="center",
+                        fontsize=DIAG_FONTSIZE,
+                        fontweight="bold",
+                        color="black",
+                        wrap=True,
+                    )
+
+                elif diag == "hist":
+                    ax.hist(
+                        data[col_i].dropna(),
+                        color=color,
+                        edgecolor="white",
+                        linewidth=0.4,
+                    )
+                    ax.set_xlabel("")
+                    ax.set_ylabel("")
+
+                else:  # density
+                    try:
+                        from scipy.stats import gaussian_kde
+                        vals = data[col_i].dropna().values.astype(float)
+                        kde = gaussian_kde(vals)
+                        xs = np.linspace(vals.min(), vals.max(), 200)
+                        ax.plot(xs, kde(xs), color=color, linewidth=1.8)
+                        ax.fill_between(xs, kde(xs), alpha=0.15, color=color)
+                    except Exception:
+                        # Fall back to histogram if scipy unavailable
+                        ax.hist(data[col_i].dropna(), color=color,
+                                edgecolor="white", linewidth=0.4)
+                    ax.set_xlabel("")
+                    ax.set_ylabel("")
+
+            # ── off-diagonal scatter ───────────────────────────────────────
+            else:
+                x_vals = data[col_j].values
+                y_vals = data[col_i].values
+                ax.scatter(
+                    x_vals, y_vals,
+                    c=color, s=18, alpha=0.6,
+                    linewidths=0,
+                    **_scatter_kw,
                 )
 
-    plt.tight_layout()
+                if lines:
+                    try:
+                        mask = ~(np.isnan(x_vals) | np.isnan(y_vals))
+                        if mask.sum() > 2:
+                            m, b = np.polyfit(x_vals[mask], y_vals[mask], 1)
+                            xlim = ax.get_xlim()
+                            xs = np.array(xlim)
+                            ax.plot(xs, m * xs + b,
+                                    color="black", linewidth=1.2, zorder=3)
+                            ax.set_xlim(xlim)
+                    except Exception:
+                        pass
+
+            # ── tick formatting ────────────────────────────────────────────
+            ax.tick_params(
+                axis="both",
+                labelsize=TICK_FONTSIZE,
+                length=3,
+                width=0.6,
+                pad=2,
+            )
+            # Reduce tick density to avoid crowding
+            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=4, prune="both"))
+            ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4, prune="both"))
+
+            # ── no axis labels on any panel ───────────────────────────────
+            ax.set_xlabel("")
+            ax.set_ylabel("")
+            if i < n - 1:
+                ax.tick_params(labelbottom=False)
+            else:
+                # Bottom row: rotate to prevent overlap with large numbers
+                plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+            if j > 0:
+                ax.tick_params(labelleft=False)
+
+    plt.suptitle(title, fontsize=TITLE_FONTSIZE, fontweight="bold")
+    plt.tight_layout(pad=0.4, h_pad=0.3, w_pad=0.3, rect=[0, 0, 1, 0.97])
     plt.show()
-    plt.close(g.fig)
+    plt.close(fig)
+
 
 
 # ======================================================================
@@ -540,7 +585,6 @@ def _plot_res(
     model,
     res: str = "resid",
     color: str = "blue",
-    lcolor: str = "red",
     title: str = "Residual Plot",
     xlab: str = "Fitted values",
     ylab: str = "Residuals",
@@ -560,8 +604,6 @@ def _plot_res(
         Residual type: "resid", "pearson", "deviance", "studentized", etc.
     color : str, default="blue"
         Point color
-    lcolor : str, default="red"
-        Reference line color
     title : str, default="Residual Plot"
         Plot title
     xlab : str, default="Fitted values"
@@ -601,9 +643,19 @@ def _plot_res(
       not the linear predictor. Labels reflect that.
     - LOWESS smoothing is automatically subsampled for datasets > 5000 points
     - Normalizes res parameter internally for defensive programming.
+    - Reference lines are drawn in gray color.
     """
     # Normalize res parameter defensively (in case called directly)
     res = str(res).lower().strip()
+    
+    # Default line color for reference lines
+    color0 = "gray"
+    lcolor = "red"
+
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
     
     model_type = _detect_model_type(model)
     residuals = _get_residuals(model, res)
@@ -623,11 +675,11 @@ def _plot_res(
         **kwargs,
     )
 
-    ax.axhline(0, color=lcolor, linestyle="--", linewidth=1.5, alpha=0.8, label="Reference (y=0)")
+    ax.axhline(0, color=color0, linestyle="--", linewidth=1.5, alpha=0.8, label="Reference (e=0)")
 
     if model_type in ["logistic", "glm"] and res in ["pearson", "deviance"]:
-        ax.axhline(2, color=lcolor, linestyle=":", linewidth=1, alpha=0.5, label="±2 bounds")
-        ax.axhline(-2, color=lcolor, linestyle=":", linewidth=1, alpha=0.5)
+        ax.axhline(2, color=color0, linestyle=":", linewidth=1, alpha=0.5, label="±2 bounds")
+        ax.axhline(-2, color=color0, linestyle=":", linewidth=1, alpha=0.5)
 
     # ======================================================================
     # Subsample for LOWESS if dataset is large
@@ -645,9 +697,9 @@ def _plot_res(
                 fitted_sample = fitted[indices]
                 resid_sample = residuals[indices]
                 
-                smoothed = lowess(resid_sample, fitted_sample, frac=0.3, return_sorted=True)
+                smoothed = lowess(resid_sample, fitted_sample, frac=2/3, return_sorted=True)
             else:
-                smoothed = lowess(residuals, fitted, frac=0.3, return_sorted=True)
+                smoothed = lowess(residuals, fitted, frac=2/3, return_sorted=True)
                 
             ax.plot(smoothed[:, 0], smoothed[:, 1], color=lcolor, linewidth=2, alpha=0.8, label="LOWESS smooth")
         except ImportError:
@@ -663,9 +715,10 @@ def _plot_res(
                 stacklevel=2
             )
 
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    ax.set_title(plot_title)
+    ax.set_xlabel(x_label, fontsize=label_fontsize)
+    ax.set_ylabel(y_label, fontsize=label_fontsize)
+    ax.set_title(plot_title, fontsize=title_fontsize)
+    ax.tick_params(labelsize=tick_fontsize)
     ax.grid(True, alpha=0.3)
 
     if ax.get_legend_handles_labels()[1]:

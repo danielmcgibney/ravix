@@ -1,0 +1,156 @@
+Metadata-Version: 2.4
+Name: ravix
+Version: 1.0.0
+Summary: Applied regression modeling and visualization for business analytics
+Home-page: https://github.com/danmcgib/ravix
+Author: Daniel McGibney
+Author-email: dmcgibney@bus.miami.edu
+License: MIT
+Project-URL: Homepage, https://github.com/danielmcgibney/ravix
+Project-URL: Source, https://github.com/danielmcgibney/ravix
+Project-URL: Issues, https://github.com/danielmcgibney/ravix/issues
+Keywords: regression,ols,logistic regression,business analytics,statistics,education,formula
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Intended Audience :: Education
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Scientific/Engineering :: Mathematics
+Classifier: Topic :: Scientific/Engineering :: Information Analysis
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: numpy>=1.20
+Requires-Dist: pandas>=1.4
+Requires-Dist: statsmodels>=0.13
+Requires-Dist: matplotlib>=3.5
+Requires-Dist: lxml
+Dynamic: license-file
+
+# Ravix
+
+Ravix is a Python package for regression analysis and data visualization. It provides tools for model fitting, prediction, and various types of plots to help visualize your data.
+
+## Features
+
+- Model fitting and prediction with convenient formula notation
+- Streamlined code for plotting (boxplot, histogram, scatter plot, etc.)
+- Regression analysis diagnostic tools
+- Integration with popular libraries like `pandas` and `statsmodels`
+
+## Installation
+
+You can install the package using `pip`:
+
+```sh
+pip install ravix
+```
+
+## Usage
+
+Here are some examples of how to use the key functions in the package.
+
+### Importing the Package
+
+To use the functions provided by the package, import it as follows:
+
+```python
+import ravix
+```
+
+### Getting Data
+
+There are multiple datasets available from Ravix and are easily attained using the `get_data` function.  The datasets currently available can be found using the following:
+
+```python
+import ravix
+ravix.get_data()
+```
+
+See [Applied Linear Regression for Business Analytics with Python](www.businessregression.com) for details regarding these datasets.  Sample import example:
+
+```python
+import ravix
+
+# Load data from ravix
+df = ravix.get_data("Betas.csv")
+
+# Format the data (for later)
+df.drop(columns = df.columns[0], inplace=True)
+```
+
+### Model Fitting and Prediction
+
+Ravix formula supports formula functionality similar to R. Fit a model with a formula:
+
+```python
+# Fit model with formula 
+model = ravix.ols("SPY ~ .", df)
+```
+
+Summary types are specified using the `out` argument.  Different summaries are available including:
+
+* simple (default)
+* statsmodels 
+* R
+* ANOVA
+* coefficients (coef)
+
+```python
+# Generate a model summary
+model.summary()
+```
+
+### Making Predictions
+
+A Statsmodels object is created by default.  From this object, the predict function can be used. Since `df` is the dataframe used to fit the model, the following lines produce the same result.
+
+```python
+# Make predictions
+ravix.predict(model, df)
+
+# Produce fitted values
+ravix.predict(model)
+```
+
+### General Plotting
+
+Plotting code is streamlined and built on top of Seaborn and MatPlotLib. Samples provided below.
+
+```python
+# Generate a boxplot
+ravix.boxplot("SPY ~ .", df)
+
+# Generate a histogram
+ravix.hist(df.SPY)
+
+# Multiple histograms
+ravix.hist("SPY ~ .",data = df)
+
+# Scatter plot
+ravix.plot("MSFT ~ SPY", data = df)
+
+# Multiple Scatter plots
+ravix.plot("SPY ~ .", data = df)
+
+# Correlation Plot
+ravix.plot_cor(df)
+```
+
+## Contributing
+
+We welcome contributions to Ravix! If you find a bug or have a feature request, please open an issue on [GitHub](https://github.com/danielmcgibney/ravix). You can also contribute by:
+
+1. Forking the repository
+2. Creating a new branch (`git checkout -b feature-branch`)
+3. Committing your changes (`git commit -am 'Add some feature'`)
+4. Pushing to the branch (`git push origin feature-branch`)
+5. Creating a pull request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgements
+
+We would like to thank all contributors and users of Ravix for their support and feedback.

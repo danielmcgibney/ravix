@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from statsmodels.graphics.gofplots import ProbPlot
 
 from ravix.modeling.parse_formula import parse_formula
+from ravix.plots._theme import get_theme, _resolve_figsize
 from ravix.plots._utils import (
     _ensure_no_intercept,
     _as_1d_numeric,
@@ -34,11 +35,12 @@ def qq(
     color: str = "blue",
     lcolor: str = "red",
     band_color: Optional[str] = None,
+    line_type: Literal["45", "s", "r", "q"] = "45",
     layout: Literal["column", "row", "matrix"] = "matrix",
     title: Optional[str] = None,
     xlab: str = "Theoretical Quantiles",
     ylab: str = "Sample Quantiles",
-    figsize: Tuple[float, float] = (10, 6),
+    figsize: Optional[Tuple[float, float]] = None,
     grid: bool = True,
     show: bool = True,
     **kwargs
@@ -82,6 +84,14 @@ def qq(
         Color for reference line.
     band_color : Optional[str], default=None
         Color for confidence band. If None, uses `color`.
+    line_type : Literal["45", "s", "r", "q"], default="45"
+        Type of reference line for Q-Q plot. This determines both the plotted
+        reference line AND how confidence bands are computed:
+        - "45": 45-degree line through mean with slope = sample std (standardized)
+        - "s": Same as "45" (statsmodels alias)
+        - "r": OLS regression line (slope and intercept from least squares fit)
+        - "q": Quartile-based line (passes through Q1 and Q3)
+        Confidence bands are always computed relative to the chosen reference line.
     layout : Literal["column", "row", "matrix"], default="matrix"
         Layout for multiple Q-Q plots (Modes 4).
     title : Optional[str], default=None
@@ -113,6 +123,11 @@ def qq(
     >>> # Mode 1: Single vector
     >>> data = np.random.normal(0, 1, 1000)
     >>> qq(data)
+    
+    >>> # Different reference lines
+    >>> qq(data, line_type="45")   # 45-degree through mean (default)
+    >>> qq(data, line_type="r")    # OLS regression line
+    >>> qq(data, line_type="q")    # Quartile-based line
     
     >>> # Mode 2: Column name
     >>> qq("mpg", data=mtcars)
@@ -154,7 +169,10 @@ def qq(
         * "y ~ x1 + x2" → 3 plots (x1, x2, and y)
     - Single-column DataFrames are treated as Mode 1 (single Q-Q plot)
     - Formulas create Q-Q plots for individual variable distributions, NOT relationships between variables
-    - Confidence band is computed by statsmodels using specified level (e.g., 0.95 for 95% CI)
+    - **Confidence bands**: Computed relative to the chosen reference line (line_type):
+        * For "45": Bands are centered on the standardized 45-degree line
+        * For "r": Bands are centered on the OLS regression line
+        * For "q": Bands are centered on the quartile-based line
     - For multiple plots (Mode 4), layout controls arrangement (column/row/matrix)
     - show parameter works for single plots (Modes 1-3, 5) but ignored for multiple (Mode 4)
     - Grid can be disabled by setting grid=False
@@ -167,6 +185,7 @@ def qq(
         If insufficient data points for Q-Q plot.
         If column name not found in data.
         If layout is not 'column', 'row', or 'matrix'.
+        If line_type is not one of '45', 's', 'r', 'q'.
     """
     # Validate level
     if level is not None:
@@ -179,6 +198,9 @@ def qq(
     # Set band_color default
     if band_color is None:
         band_color = color
+
+    # Resolve figsize via theme (once, before dispatching to sub-functions)
+    figsize = _resolve_figsize(figsize)
     
     # Mode 5: Fitted model with residuals
     if hasattr(input_data, 'resid'):
@@ -197,6 +219,7 @@ def qq(
             color=color,
             lcolor=lcolor,
             band_color=band_color,
+            line_type=line_type,
             title=title if title else f"Q-Q Plot of {label}",
             xlab=xlab,
             ylab=ylab,
@@ -228,6 +251,7 @@ def qq(
                 color=color,
                 lcolor=lcolor,
                 band_color=band_color,
+                line_type=line_type,
                 layout=layout,
                 title=title if title else "Q-Q Plots",
                 figsize=figsize,
@@ -260,6 +284,7 @@ def qq(
                     color=color,
                     lcolor=lcolor,
                     band_color=band_color,
+                    line_type=line_type,
                     layout=layout,
                     title=title if title else "Q-Q Plots",
                     figsize=figsize,
@@ -290,6 +315,7 @@ def qq(
                 color=color,
                 lcolor=lcolor,
                 band_color=band_color,
+                line_type=line_type,
                 title=title if title else "Q-Q Plot",
                 xlab=xlab,
                 ylab=ylab,
@@ -335,6 +361,7 @@ def qq(
                 color=color,
                 lcolor=lcolor,
                 band_color=band_color,
+                line_type=line_type,
                 title=title if title else "Q-Q Plot",
                 xlab=xlab,
                 ylab=ylab,
@@ -355,6 +382,7 @@ def qq(
             color=color,
             lcolor=lcolor,
             band_color=band_color,
+            line_type=line_type,
             layout=layout,
             title=title if title else "Q-Q Plots",
             figsize=figsize,
@@ -391,6 +419,7 @@ def qq(
         color=color,
         lcolor=lcolor,
         band_color=band_color,
+        line_type=line_type,
         title=title if title else "Q-Q Plot",
         xlab=xlab,
         ylab=ylab,
@@ -412,6 +441,7 @@ def _qq_single(
     color: str = "blue",
     lcolor: str = "red",
     band_color: str = "blue",
+    line_type: str = "45",
     title: str = "Q-Q Plot",
     xlab: str = "Theoretical Quantiles",
     ylab: str = "Sample Quantiles",
@@ -421,20 +451,24 @@ def _qq_single(
     **kwargs
 ) -> Optional[Tuple[plt.Figure, plt.Axes]]:
     """Create a single Q-Q plot."""
+    from scipy import stats
+    
     # Clean data
     v = _as_1d_numeric(values)
     
     if v.size < 2:
         raise ValueError("Need at least 2 finite observations for a Q-Q plot.")
-    
+
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
+
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Map level -> alpha for statsmodels (alpha is significance level, not confidence level)
-    qq_alpha = None if level is None else (1.0 - float(level))
-    
-    # Statsmodels draws points + reference line + optional CI band
+    # Create Q-Q plot with specified line type
     pp = ProbPlot(v, fit=True)
-    pp.qqplot(line="45", alpha=qq_alpha, ax=ax, **kwargs)
+    pp.qqplot(line=line_type, ax=ax, **kwargs)
     
     # Style the plot elements (robust to statsmodels version differences)
     lines = ax.get_lines()
@@ -446,23 +480,92 @@ def _qq_single(
             lines[0].set_markeredgecolor(color)
             lines[0].set_color(color)
         
-        # Second line: reference line (45-degree line)
+        # Second line: reference line
         if len(lines) >= 2:
             lines[1].set_color(lcolor)
-        
-        # Third/fourth lines: confidence band (only if level was specified)
-        if level is not None and len(lines) >= 3:
-            for i in range(2, len(lines)):
-                lines[i].set_color(band_color)
-                lines[i].set_alpha(0.3)
     except (AttributeError, IndexError):
         # Styling failed - plot will still show with default colors
         pass
     
+    # Add confidence bands if level is specified
+    # Bands MUST be computed relative to the chosen reference line
+    if level is not None:
+        # CRITICAL: Use the SAME quantiles that ProbPlot used for plotting
+        # Do NOT recompute with np.sort() or manual plotting positions
+        z = pp.theoretical_quantiles  # Theoretical quantiles (x-axis)
+        sample_quantiles = pp.sample_quantiles  # Sample quantiles (y-axis)
+        n = len(z)
+        
+        # Compute reference line parameters based on line_type
+        # MUST use the same z and sample_quantiles that were plotted
+        if line_type in ("45", "s"):
+            # 45-degree line: y = mean + sd * z
+            mean_data = np.mean(sample_quantiles)
+            sd_data = np.std(sample_quantiles, ddof=1)
+            slope = sd_data
+            intercept = mean_data
+            
+        elif line_type == "r":
+            # OLS regression line using the PLOTTED quantiles
+            slope, intercept = np.polyfit(z, sample_quantiles, 1)
+            
+        elif line_type == "q":
+            # Quartile-based line using the PLOTTED quantiles
+            q1_z = np.percentile(z, 25)
+            q3_z = np.percentile(z, 75)
+            q1_s = np.percentile(sample_quantiles, 25)
+            q3_s = np.percentile(sample_quantiles, 75)
+            
+            slope = (q3_s - q1_s) / (q3_z - q1_z)
+            intercept = q1_s - slope * q1_z
+            
+        else:
+            # Fallback to 45-degree line
+            mean_data = np.mean(sample_quantiles)
+            sd_data = np.std(sample_quantiles, ddof=1)
+            slope = sd_data
+            intercept = mean_data
+        
+        # Compute SE in Z-space using analytic formula for order statistics
+        # SE = sqrt(p(1-p)/n) / phi(z), where phi is the standard normal PDF
+        # This matches the method used in _qqs_from_df and produces symmetric bands
+        p = np.arange(1, n + 1) / (n + 1)
+        pdf_vals = stats.norm.pdf(z)
+        pdf_vals = np.maximum(pdf_vals, 1e-10)  # Guard against division by zero at tails
+        se_z = np.sqrt(p * (1 - p) / n) / pdf_vals
+
+        # Critical value
+        z_crit = stats.norm.ppf((1 + level) / 2)
+
+        # Transform bands through reference line
+        upper_band = intercept + slope * (z + z_crit * se_z)
+        lower_band = intercept + slope * (z - z_crit * se_z)
+        
+        # Plot confidence bands using the SAME z-coordinates as the plotted points
+        ax.plot(z, upper_band, '--', 
+                color=band_color, alpha=0.7, linewidth=2, 
+                zorder=1, label=f'{int(level*100)}% CI')
+        ax.plot(z, lower_band, '--', 
+                color=band_color, alpha=0.7, linewidth=2,
+                zorder=1)
+    
     # Labels and styling
-    ax.set_title(title)
-    ax.set_xlabel(xlab)
-    ax.set_ylabel(ylab)
+    ax.set_title(title, fontsize=title_fontsize, fontweight='bold')
+    ax.set_xlabel(xlab, fontsize=label_fontsize)
+    ax.set_ylabel(ylab, fontsize=label_fontsize)
+    ax.tick_params(axis='both', which='major', labelsize=tick_fontsize)
+    
+    # Adjust axis limits to tightly fit the data
+    if len(pp.theoretical_quantiles) > 0:
+        x_min = pp.theoretical_quantiles.min()
+        x_max = pp.theoretical_quantiles.max()
+        x_margin = (x_max - x_min) * 0.05  # 5% margin
+        ax.set_xlim(x_min - x_margin, x_max + x_margin)
+        
+        y_min = pp.sample_quantiles.min()
+        y_max = pp.sample_quantiles.max()
+        y_margin = (y_max - y_min) * 0.05  # 5% margin
+        ax.set_ylim(y_min - y_margin, y_max + y_margin)
     
     if grid:
         ax.grid(True, alpha=0.3)
@@ -486,9 +589,10 @@ def _qqs_from_df(
     color: str = "blue",
     lcolor: str = "red",
     band_color: str = "blue",
+    line_type: str = "45",
     layout: Literal["column", "row", "matrix"] = "matrix",
     title: str = "Q-Q Plots",
-    figsize: Tuple[float, float] = (5, 5),
+    figsize: Optional[Tuple[float, float]] = None,
     grid: bool = True,
     **kwargs
 ) -> None:
@@ -526,6 +630,8 @@ def _qqs_from_df(
     - Each column is cleaned independently (NaNs dropped per variable)
     - Defensively cleans input to ensure numeric-only data
     """
+    from scipy import stats
+    
     # Validate layout first (fail fast before expensive operations)
     if layout not in _VALID_LAYOUTS:
         raise ValueError(f"layout must be one of {_VALID_LAYOUTS}, got '{layout}'")
@@ -548,15 +654,20 @@ def _qqs_from_df(
         ncols = int(np.ceil(num_vars / nrows))
     
     # Use figsize as total figure size (not per-subplot)
-    final_figsize = figsize
-    
-    fig, axes = plt.subplots(nrows, ncols, figsize=final_figsize)
+    if figsize is None:
+        theme_base = get_theme().get("figsize") or plt.rcParams["figure.figsize"]
+        cell = max(2.2, theme_base[0] / nrows)
+        figsize = (cell * ncols, cell * nrows)
+
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
     axes = np.array(axes).reshape(-1)
     
-    fig.suptitle(title, fontsize=16)
-    
-    # Map level to alpha
-    qq_alpha = None if level is None else (1.0 - float(level))
+    fig.suptitle(title, fontsize=title_fontsize)
     
     for i, var in enumerate(plot_data.columns):
         ax = axes[i]
@@ -567,9 +678,9 @@ def _qqs_from_df(
             ax.axis("off")
             continue
         
-        # Create Q-Q plot
+        # Create Q-Q plot with specified line type
         pp = ProbPlot(v, fit=True)
-        pp.qqplot(line="45", alpha=qq_alpha, ax=ax, **kwargs)
+        pp.qqplot(line=line_type, ax=ax, **kwargs)
         
         # Style (robust to statsmodels version differences)
         try:
@@ -580,17 +691,76 @@ def _qqs_from_df(
                 lines[0].set_color(color)
             if len(lines) >= 2:
                 lines[1].set_color(lcolor)
-            if level is not None and len(lines) >= 3:
-                for j in range(2, len(lines)):
-                    lines[j].set_color(band_color)
-                    lines[j].set_alpha(0.3)
         except (AttributeError, IndexError):
             # Styling failed - plot will still show with default colors
             pass
         
-        ax.set_title(f"Q-Q Plot of {var}")
-        ax.set_xlabel("Theoretical Quantiles")
-        ax.set_ylabel("Sample Quantiles")
+        # Add confidence bands if level is specified
+        # Bands MUST be computed relative to the chosen reference line
+        if level is not None:
+            # CRITICAL: Use the SAME quantiles that ProbPlot used for plotting
+            # Do NOT recompute with np.sort() or manual plotting positions
+            z = pp.theoretical_quantiles  # Theoretical quantiles (x-axis)
+            sample_quantiles = pp.sample_quantiles  # Sample quantiles (y-axis)
+            n = len(z)
+            
+            # Compute reference line parameters based on line_type
+            # MUST use the same z and sample_quantiles that were plotted
+            if line_type in ("45", "s"):
+                # 45-degree line: y = mean + sd * z
+                mean_data = np.mean(sample_quantiles)
+                sd_data = np.std(sample_quantiles, ddof=1)
+                slope = sd_data
+                intercept = mean_data
+                
+            elif line_type == "r":
+                # OLS regression line using the PLOTTED quantiles
+                slope, intercept = np.polyfit(z, sample_quantiles, 1)
+                
+            elif line_type == "q":
+                # Quartile-based line using the PLOTTED quantiles
+                q1_z = np.percentile(z, 25)
+                q3_z = np.percentile(z, 75)
+                q1_s = np.percentile(sample_quantiles, 25)
+                q3_s = np.percentile(sample_quantiles, 75)
+                
+                slope = (q3_s - q1_s) / (q3_z - q1_z)
+                intercept = q1_s - slope * q1_z
+                
+            else:
+                # Fallback to 45-degree line
+                mean_data = np.mean(sample_quantiles)
+                sd_data = np.std(sample_quantiles, ddof=1)
+                slope = sd_data
+                intercept = mean_data
+            
+            # Compute SE in Z-space using the SAME plotting positions as ProbPlot
+            p = np.arange(1, n + 1) / (n + 1)
+            
+            # SE = sqrt(p(1-p)/n) / phi(z) where phi is standard normal PDF
+            pdf_vals = stats.norm.pdf(z)
+            pdf_vals = np.maximum(pdf_vals, 1e-10)
+            se_z = np.sqrt(p * (1 - p) / n) / pdf_vals
+            
+            # Critical value
+            z_crit = stats.norm.ppf((1 + level) / 2)
+            
+            # Transform bands through reference line
+            upper_band = intercept + slope * (z + z_crit * se_z)
+            lower_band = intercept + slope * (z - z_crit * se_z)
+            
+            # Plot bands using the SAME z-coordinates as the plotted points
+            ax.plot(z, upper_band, '--', 
+                    color=band_color, alpha=0.7, linewidth=2,
+                    zorder=1)
+            ax.plot(z, lower_band, '--', 
+                    color=band_color, alpha=0.7, linewidth=2,
+                    zorder=1)
+        
+        ax.set_title(f"Q-Q Plot of {var}", fontsize=title_fontsize)
+        ax.set_xlabel("Theoretical Quantiles", fontsize=label_fontsize)
+        ax.set_ylabel("Sample Quantiles", fontsize=label_fontsize)
+        ax.tick_params(axis='both', which='major', labelsize=tick_fontsize)
         
         if grid:
             ax.grid(True, alpha=0.3)

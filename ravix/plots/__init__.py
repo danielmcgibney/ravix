@@ -46,6 +46,9 @@ from .plot_intervals import plot_intervals
 from .plot import plot
 from .viz import viz
 
+# Theme system
+from ._theme import set_theme, get_theme, theme_context, register_theme
+
 __all__ = [
     # Utilities
     'abline',
@@ -63,4 +66,10 @@ __all__ = [
     
     # Main plotting interface
     'viz',
+    
+    # Theme
+    'set_theme',
+    'get_theme', 
+    'theme_context',
+    'register_theme',
 ]

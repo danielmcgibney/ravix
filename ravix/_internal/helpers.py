@@ -2,6 +2,8 @@ from importlib import resources
 import pandas as pd
 import warnings
 import os
+from ravix._version import __version__
+
 
 def get_data(filename=None):
     """
@@ -28,7 +30,7 @@ def get_data(filename=None):
                 files = sorted(files)
 
                 if files:
-                    print("Available data files in ravix:")
+                    print(f"Available data files in Ravix (v{__version__}):")
                     for f in files:
                         print(f"  - {f}")
                 else:

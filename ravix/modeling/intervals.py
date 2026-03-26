@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Union, Literal
+from typing import Union, Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -10,7 +10,8 @@ def intervals(
     model,
     newX: Union[pd.DataFrame, np.ndarray],
     interval: Literal["confidence", "prediction"] = "confidence",
-    alpha: float = 0.05,
+    level: Optional[float] = None,
+    alpha: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     Calculate confidence or prediction intervals for new observations.
@@ -31,10 +32,16 @@ def intervals(
         Type of interval to calculate:
         - "confidence": Interval for the mean response (narrower)
         - "prediction": Interval for individual observations (wider)
-    alpha : float, default=0.05
+    level : float, optional
+        Confidence level for the intervals, between 0 and 1 (exclusive).
+        Common values: 0.90 (90% CI), 0.95 (95% CI), 0.99 (99% CI).
+        If not specified, defaults to 0.95.
+        Cannot be used together with alpha.
+    alpha : float, optional
         Significance level for the intervals, between 0 and 1 (exclusive).
         Confidence level = 1 - alpha.
         Common values: 0.10 (90% CI), 0.05 (95% CI), 0.01 (99% CI).
+        Cannot be used together with level.
     
     Returns
     -------
@@ -50,22 +57,28 @@ def intervals(
     >>> import ravix
     >>> model = ravix.ols("mpg ~ hp + wt", data=mtcars)
     
-    >>> # 95% confidence intervals for new observations
+    >>> # 95% confidence intervals (default)
     >>> new_data = pd.DataFrame({'hp': [110, 150], 'wt': [2.5, 3.0]})
-    >>> ravix.intervals(model, new_data, interval='confidence', alpha=0.05)
+    >>> ravix.intervals(model, new_data, interval='confidence')
+    
+    >>> # 95% confidence intervals (explicit level)
+    >>> ravix.intervals(model, new_data, interval='confidence', level=0.95)
     
     >>> # 95% prediction intervals (wider than confidence intervals)
-    >>> ravix.intervals(model, new_data, interval='prediction', alpha=0.05)
+    >>> ravix.intervals(model, new_data, interval='prediction', level=0.95)
     
-    >>> # 99% confidence level (alpha=0.01)
-    >>> ravix.intervals(model, new_data, interval='confidence', alpha=0.01)
+    >>> # 99% confidence level
+    >>> ravix.intervals(model, new_data, interval='confidence', level=0.99)
     
-    >>> # 90% confidence level (alpha=0.10)
-    >>> ravix.intervals(model, new_data, interval='confidence', alpha=0.10)
+    >>> # 90% confidence level
+    >>> ravix.intervals(model, new_data, interval='confidence', level=0.90)
+    
+    >>> # Using alpha instead of level (alpha=0.05 gives 95% CI)
+    >>> ravix.intervals(model, new_data, interval='confidence', alpha=0.05)
     
     >>> # Using numpy array (automatically converted)
     >>> new_array = np.array([[110, 2.5], [150, 3.0]])
-    >>> ravix.intervals(model, new_array, interval='prediction', alpha=0.05)
+    >>> ravix.intervals(model, new_array, interval='prediction', level=0.95)
     
     Notes
     -----
@@ -74,22 +87,48 @@ def intervals(
     - Prediction intervals are always wider than confidence intervals
     - Intercept column is automatically added if required by the model
     - newX should match the predictors used in model fitting (excluding intercept)
-    - alpha is the significance level; confidence level = 1 - alpha
-      (e.g., alpha=0.05 gives 95% confidence interval)
+    - Default confidence level is 0.95 (95% confidence interval)
+    - You can specify either level or alpha, but not both
+    - level and alpha are related: level = 1 - alpha
     
     Raises
     ------
     ValueError
         If interval is not "confidence" or "prediction".
-        If alpha is not between 0 and 1 (exclusive).
+        If both level and alpha are specified.
+        If neither level nor alpha is within (0, 1).
+        If level or alpha is not between 0 and 1 (exclusive).
     
     See Also
     --------
     predict : Generate point predictions without intervals
     """
-    # Validate alpha
-    if not (0 < alpha < 1):
-        raise ValueError(f"alpha must be between 0 and 1 (exclusive), got {alpha}")
+    # Validate that both level and alpha are not specified
+    if level is not None and alpha is not None:
+        raise ValueError(
+            "Cannot specify both 'level' and 'alpha'. "
+            "Use 'level' for confidence level (e.g., 0.95 for 95% CI) "
+            "or 'alpha' for significance level (e.g., 0.05 for 95% CI)."
+        )
+    
+    # Set default and convert level to alpha if needed
+    if level is None and alpha is None:
+        # Default to 95% confidence level
+        alpha = 0.05
+    elif level is not None:
+        # Validate level
+        if not (0 < level < 1):
+            raise ValueError(
+                f"level must be between 0 and 1 (exclusive), got {level}"
+            )
+        # Convert level to alpha
+        alpha = 1 - level
+    else:
+        # alpha was provided, validate it
+        if not (0 < alpha < 1):
+            raise ValueError(
+                f"alpha must be between 0 and 1 (exclusive), got {alpha}"
+            )
     
     # Validate interval type
     if interval not in ("confidence", "prediction"):

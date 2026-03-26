@@ -143,7 +143,7 @@ def stepwise(formula, data, method='ols', direction='backward', metric='aic',
 
     if verbose:
         print(f"Initial {label} = {current_score:.4f}")
-        print(f"Initial variables: {[v for v in selected if v not in ['Intercept', 'const']]}")
+        #print(f"Initial variables: {[v for v in selected if v not in ['Intercept', 'const']]}")
 
     step_count = 0
     while step_count < max_steps:
@@ -233,7 +233,7 @@ def stepwise(formula, data, method='ols', direction='backward', metric='aic',
     final_variables = [v for v in selected if v not in ['Intercept', 'const']]
     
     if verbose:
-        print(f"Final model variables: {final_variables}")
+        #print(f"Final model variables: {final_variables}")
         print(f"Final {label} = {current_score:.4f}")
     
     # Add comprehensive step information to the model

@@ -3,7 +3,8 @@ import statsmodels.api as sm
 import pandas as pd
 import numpy as np
 from .predict import predict
-from typing import Union
+from .summary import summary as summary_function
+from typing import Union, Optional
 
 
 def _fit_matrices(Y, X, method: str, **kwargs):
@@ -33,28 +34,78 @@ def _fit_matrices(Y, X, method: str, **kwargs):
     
     # Add metadata
     fitted.model_type = method
-    
-    # Enhance predict method
+    original_summary = fitted.summary
     fitted._statsmodels_predict = fitted.predict
     
     def predict_wrapper(newdata=None, *args, **kwargs):
+        """
+        Make predictions on new data.
+        
+        Parameters
+        ----------
+        newdata : DataFrame, optional
+            New data for predictions. If None, returns fitted values.
+        
+        Returns
+        -------
+        array-like
+            Predicted values
+        
+        Examples
+        --------
+        >>> predictions = model.predict(new_data)
+        >>> fitted_values = model.predict()  # No new data
+        
+        See Also
+        --------
+        ravix.predict : Full documentation and advanced options
+        """
         if newdata is None:
             return fitted._statsmodels_predict()
         return predict(fitted, newdata, *args, **kwargs)
     
     fitted.predict = predict_wrapper
     
+    fitted._statsmodels_summary = original_summary
+    
+    def summary_wrapper(out='simple', alpha=0.05, format='text'):
+        """
+        Generate a formatted summary of the model.
+        
+        Parameters
+        ----------
+        out : str, default='simple'
+            Format: 'simple', 'r', 'stata', 'coefficients', 'anova', 'anova_lm'
+        alpha : float, default=0.05
+            Significance level for confidence intervals
+        format : str, default='text'
+            Output: 'text', 'latex', or 'df'
+        
+        Examples
+        --------
+        >>> model.summary()  # Simple format
+        >>> model.summary(out='r', format='latex')  # R-style LaTeX
+        >>> df = model.summary(out='coefficients', format='df')
+        
+        See Also
+        --------
+        ravix.summary : Full documentation of all output formats
+        """
+        return summary_function(fitted, out=out, alpha=alpha, format=format)
+    
+    fitted.summary = summary_wrapper
+    
     return fitted
 
 
-def _fit_model(formula: str, data: pd.DataFrame, method: str, **kwargs):
+def _fit_model(formula: str, data: Optional[pd.DataFrame], method: str, **kwargs):
     """
     Fit statistical models from formulas.
     
     Internal function that parses formulas and delegates to _fit_matrices.
     """
     
-    # Parse formula
+    # Parse formula (parse_formula handles None data by looking at environment)
     Y_out, X_out = parse_formula(formula, data)
     Y_name = Y_out.name
     
@@ -132,15 +183,15 @@ def _fit_model(formula: str, data: pd.DataFrame, method: str, **kwargs):
         )
     
     # Use direct mode to fit
-    fitted = _fit_direct(Y_out, X_out, method, **kwargs)
+    fitted = _fit_matrices(Y_out, X_out, method, **kwargs)
     
-    # Add formula metadata (not added by _fit_direct)
+    # Add formula metadata (not added by _fit_matrices)
     fitted.formula = formula
     
     return fitted
 
 
-def ols(formula: str, data: pd.DataFrame, **kwargs) -> sm.regression.linear_model.RegressionResultsWrapper:
+def ols(formula: str, data: Optional[pd.DataFrame] = None, **kwargs) -> sm.regression.linear_model.RegressionResultsWrapper:
     """
     Fit an ordinary least squares (OLS) regression model.
     
@@ -158,22 +209,34 @@ def ols(formula: str, data: pd.DataFrame, **kwargs) -> sm.regression.linear_mode
         - 'price ~ sqft + bedrooms' (multiple regression)
         - 'price ~ sqft + bedrooms + sqft:bedrooms' (with interaction)
         
-    data : DataFrame
+    data : DataFrame, optional
         Dataset containing all variables referenced in the formula.
         All variables must be present as columns in this DataFrame.
+        
+        If not provided, ravix will attempt to find variables in the
+        calling environment and build a DataFrame automatically.
+        This allows R-style usage like:
+        
+        >>> x = [1, 2, 3, 4, 5]
+        >>> y = [2, 4, 6, 8, 10]
+        >>> model = ols('y ~ x')  # Finds x and y automatically!
     **kwargs
         Additional arguments passed to statsmodels.OLS
     
     Returns
     -------
     model : statsmodels RegressionResultsWrapper
-        Fitted OLS model with the following additions:
+        Fitted OLS model with the following enhancements:
+        
+        **Attributes:**
         - model.formula : str - the formula used to fit the model
         - model.model_type : str - 'ols'
-        - model.predict(newdata) - make predictions on new data
         
-        All standard statsmodels methods are available:
-        - model.summary() : display regression results
+        **Enhanced Methods:**
+        - model.predict(newdata) - make predictions on new data
+        - model.summary(out='simple', alpha=0.05, format='text') - custom summary outputs
+        
+        **Standard statsmodels methods:**
         - model.params : estimated coefficients
         - model.rsquared : R-squared value
         - model.conf_int() : confidence intervals
@@ -196,10 +259,15 @@ def ols(formula: str, data: pd.DataFrame, **kwargs) -> sm.regression.linear_mode
     ...     'sqft': [1000, 1200, 1500, 1800]
     ... })
     >>> model = ravix.ols('price ~ sqft', data=houses)
-    >>> print(model.summary())
     >>> 
-    >>> # Multiple regression
-    >>> model = ravix.ols('price ~ sqft + bedrooms', data=houses)
+    >>> # View custom summary
+    >>> model.summary()  # Simple format
+    >>> model.summary(out='r')  # R-style format
+    >>> model.summary(out='stata')  # STATA-style format
+    >>> 
+    >>> # Get summary as LaTeX or DataFrame
+    >>> latex_output = model.summary(format='latex')
+    >>> df_output = model.summary(out='coefficients', format='df')
     >>> 
     >>> # Make predictions on new data
     >>> new_houses = pd.DataFrame({'sqft': [1300], 'bedrooms': [3]})
@@ -219,7 +287,7 @@ def ols(formula: str, data: pd.DataFrame, **kwargs) -> sm.regression.linear_mode
     return _fit_model(formula, data, method="ols", **kwargs)
 
 
-def logistic(formula: str, data: pd.DataFrame, **kwargs) -> sm.genmod.generalized_linear_model.GLMResultsWrapper:
+def logistic(formula: str, data: Optional[pd.DataFrame] = None, **kwargs):
     """
     Fit a logistic regression model for binary outcomes.
     
@@ -239,25 +307,32 @@ def logistic(formula: str, data: pd.DataFrame, **kwargs) -> sm.genmod.generalize
         - 'success ~ treatment + age' (multiple predictors)
         - 'churn ~ usage + tenure + usage:tenure' (with interaction)
         
-    data : DataFrame
+    data : DataFrame, optional
         Dataset containing all variables referenced in the formula.
         The response variable can be:
         - Numeric binary (0/1)
         - Boolean (True/False)
         - Categorical with two categories (will be converted to 0/1)
+        
+        If not provided, ravix will attempt to find variables in the
+        calling environment and build a DataFrame automatically.
     **kwargs
         Additional arguments passed to statsmodels.GLM
     
     Returns
     -------
     model : statsmodels GLMResultsWrapper
-        Fitted logistic regression model with the following additions:
+        Fitted logistic regression model with the following enhancements:
+        
+        **Attributes:**
         - model.formula : str - the formula used to fit the model
         - model.model_type : str - 'logistic'
-        - model.predict(newdata) - make predictions on new data
         
-        All standard statsmodels GLM methods are available:
-        - model.summary() : display regression results
+        **Enhanced Methods:**
+        - model.predict(newdata) - make predictions on new data
+        - model.summary(out='simple', alpha=0.05, format='text') - custom summary outputs
+        
+        **Standard statsmodels methods:**
         - model.params : estimated coefficients (log-odds scale)
         - model.conf_int() : confidence intervals
         - And many more...
@@ -281,7 +356,13 @@ def logistic(formula: str, data: pd.DataFrame, **kwargs) -> sm.genmod.generalize
     ...     'test_score': [1200, 1400, 1450, 1100, 1380]
     ... })
     >>> model = ravix.logistic('admitted ~ gpa + test_score', data=applications)
-    >>> print(model.summary())
+    >>> 
+    >>> # View custom summary
+    >>> model.summary()  # Simple format
+    >>> model.summary(out='coefficients')  # Coefficient table only
+    >>> 
+    >>> # Get summary as DataFrame
+    >>> coef_df = model.summary(out='coefficients', format='df')
     >>> 
     >>> # Categorical outcome (will be converted)
     >>> df = pd.DataFrame({
@@ -309,7 +390,7 @@ def logistic(formula: str, data: pd.DataFrame, **kwargs) -> sm.genmod.generalize
     return _fit_model(formula, data, method="logistic", **kwargs)
 
 
-def poisson(formula: str, data: pd.DataFrame, **kwargs) -> sm.genmod.generalized_linear_model.GLMResultsWrapper:
+def poisson(formula: str, data: Optional[pd.DataFrame] = None, **kwargs):
     """
     Fit a Poisson regression model for count data.
     
@@ -329,22 +410,29 @@ def poisson(formula: str, data: pd.DataFrame, **kwargs) -> sm.genmod.generalized
         - 'visits ~ treatment + age' (multiple predictors)
         - 'accidents ~ traffic + weather + traffic:weather' (with interaction)
         
-    data : DataFrame
+    data : DataFrame, optional
         Dataset containing all variables referenced in the formula.
         The response variable should be non-negative integer counts.
+        
+        If not provided, ravix will attempt to find variables in the
+        calling environment and build a DataFrame automatically.
     **kwargs
         Additional arguments passed to statsmodels.GLM
     
     Returns
     -------
     model : statsmodels GLMResultsWrapper
-        Fitted Poisson regression model with the following additions:
+        Fitted Poisson regression model with the following enhancements:
+        
+        **Attributes:**
         - model.formula : str - the formula used to fit the model
         - model.model_type : str - 'poisson'
-        - model.predict(newdata) - make predictions on new data
         
-        All standard statsmodels GLM methods are available:
-        - model.summary() : display regression results
+        **Enhanced Methods:**
+        - model.predict(newdata) - make predictions on new data
+        - model.summary(out='simple', alpha=0.05, format='text') - custom summary outputs
+        
+        **Standard statsmodels methods:**
         - model.params : estimated coefficients (log scale)
         - model.conf_int() : confidence intervals
         - And many more...
@@ -367,7 +455,10 @@ def poisson(formula: str, data: pd.DataFrame, **kwargs) -> sm.genmod.generalized
     ...     'risk_score': [2, 3, 5, 2, 6]
     ... })
     >>> model = ravix.poisson('num_claims ~ age + risk_score', data=insurance)
-    >>> print(model.summary())
+    >>> 
+    >>> # View custom summary
+    >>> model.summary()  # Simple format
+    >>> model.summary(out='coefficients', format='df')  # Get as DataFrame
     >>> 
     >>> # Make predictions on new data
     >>> new_data = pd.DataFrame({'age': [40], 'risk_score': [4]})
@@ -388,7 +479,7 @@ def poisson(formula: str, data: pd.DataFrame, **kwargs) -> sm.genmod.generalized
     return _fit_model(formula, data, method="poisson", **kwargs)
 
 
-def fit(formula: str, data: pd.DataFrame, method: str = 'ols', **kwargs):
+def fit(formula: str, data: Optional[pd.DataFrame] = None, method: str = 'ols', **kwargs):
     """
     Generic interface for fitting statistical models.
     
@@ -396,8 +487,10 @@ def fit(formula: str, data: pd.DataFrame, method: str = 'ols', **kwargs):
     ----------
     formula : str
         Model formula: 'response ~ predictor1 + predictor2 + ...'
-    data : DataFrame
-        Dataset containing the variables in the formula
+    data : DataFrame, optional
+        Dataset containing the variables in the formula.
+        If not provided, ravix will attempt to find variables in the
+        calling environment and build a DataFrame automatically.
     method : str, default='ols'
         Model type: 'ols', 'logistic', or 'poisson'
     **kwargs

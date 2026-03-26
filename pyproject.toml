@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ravix"
-version = "0.1.0"
+version = "1.0.0"
 description = "Applied regression modeling and visualization for business analytics"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -28,7 +28,8 @@ dependencies = [
     "numpy>=1.20",
     "pandas>=1.4",
     "statsmodels>=0.13",
-    "matplotlib>=3.5"
+    "matplotlib>=3.5",
+    "lxml"
 ]
 
 classifiers = [
@@ -46,8 +47,8 @@ Homepage = "https://github.com/danielmcgibney/ravix"
 Source = "https://github.com/danielmcgibney/ravix"
 Issues = "https://github.com/danielmcgibney/ravix/issues"
 
-[tool.setuptools]
-packages = ["ravix"]
+[tool.setuptools.packages.find]
+where = ["."]
 
 [tool.setuptools.package-data]
 ravix = ["data/*.csv"]

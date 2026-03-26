@@ -1,6 +1,6 @@
 # Ravix
 
-Ravix is a Python package for regression analysis and data visualization. It provides tools for model fitting, prediction, and various types of plots to help visualize your data particularly for regression analysis.
+Ravix is a Python package for regression analysis and data visualization. It provides tools for model fitting, prediction, and various types of plots to help visualize your data.
 
 ## Features
 
@@ -31,19 +31,12 @@ import ravix
 
 ### Getting Data
 
-There are multiple datasets available from Ravix and are easily attained using the `get_data` function.  The datasets currently available are:
+There are multiple datasets available from Ravix and are easily attained using the `get_data` function.  The datasets currently available can be found using the following:
 
-* AirBnb.csv
-* Betas.csv
-* Charges.csv
-* Employment.csv
-* HousePrices.csv
-* HR_retention.csv
-* MarketingToys.csv
-* Sales.csv
-* Top200.csv
-* Twitter.csv
-* Youtube.csv
+```python
+import ravix
+ravix.get_data()
+```
 
 See [Applied Linear Regression for Business Analytics with Python](www.businessregression.com) for details regarding these datasets.  Sample import example:
 
@@ -76,7 +69,7 @@ Summary types are specified using the `out` argument.  Different summaries are a
 
 ```python
 # Generate a model summary
-ravix.summary(model)
+model.summary()
 ```
 
 ### Making Predictions
@@ -103,7 +96,7 @@ ravix.boxplot("SPY ~ .", df)
 ravix.hist(df.SPY)
 
 # Multiple histograms
-ravix.hists("SPY ~ .",data = df)
+ravix.hist("SPY ~ .",data = df)
 
 # Scatter plot
 ravix.plot("MSFT ~ SPY", data = df)
@@ -115,23 +108,9 @@ ravix.plot("SPY ~ .", data = df)
 ravix.plot_cor(df)
 ```
 
-### Required Fixes
-
-Based on current testing, the following fixes are required:
-
-1. Ensure global scope accessibility for variables.
-2. Adjust summary spacing.
-3. Provide compatibility with `scikit-learn`.
-4. Implement AI-generated summaries.
-5. Allow for additional plotting customization (using kwargs).
-6. Review and improve diagnostic plots.
-7. Provide support for logistic regression and other GLMs.
-8. Provide support for automatic dummy variable retrieval.
-9. Plots should work without formulas.
-
 ## Contributing
 
-We welcome contributions to Ravix! If you find a bug or have a feature request, please open an issue on [GitHub](https://github.com/danmcgib/ravix). You can also contribute by:
+We welcome contributions to Ravix! If you find a bug or have a feature request, please open an issue on [GitHub](https://github.com/danielmcgibney/ravix). You can also contribute by:
 
 1. Forking the repository
 2. Creating a new branch (`git checkout -b feature-branch`)

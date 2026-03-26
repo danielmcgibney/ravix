@@ -84,11 +84,11 @@ def ncv(
     
     if not return_dict:
         print("Nonconstant Variance Test")
-        print("========================================")
+        print("=======================================================")
         print(f"Test Statistic      : {test_stat:.4f}")
         print(f"p-value             : {p_value:.4g}")
         print(f"Result              : {result}")
-        print("========================================")
+        print("=======================================================")
     else:
         return {
             'test_statistic': test_stat,
@@ -177,11 +177,11 @@ def bp(
     
     if not return_dict:
         print("Breusch-Pagan Test for Heteroscedasticity")
-        print("========================================")
+        print("=======================================================")
         print(f"Test Statistic      : {bp_stat:.4f}")
         print(f"p-value             : {p_value:.4g}")
         print(f"Result              : {result}")
-        print("========================================")
+        print("=======================================================")
     else:
         return {
             'test_statistic': bp_stat,

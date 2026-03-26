@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from ravix.modeling.parse_formula import parse_formula
-from ravix.modeling.parse_formula import parse_formula
+from ravix.plots._theme import get_theme, _resolve_figsize
 from ravix.plots._utils import (
     _ensure_no_intercept,
     _get_residuals,
@@ -30,7 +30,7 @@ def hist(
     title: Optional[str] = None,
     xlab: Optional[str] = None,
     ylab: str = "Frequency",
-    figsize: Tuple[float, float] = (10, 6),
+    figsize: Optional[Tuple[float, float]] = None,
     show: bool = True,
     **kwargs
 ) -> Optional[Tuple[plt.Figure, plt.Axes]]:
@@ -135,6 +135,9 @@ def hist(
     valid_layouts = ["column", "row", "matrix"]
     if layout not in valid_layouts:
         raise ValueError(f"layout must be one of {valid_layouts}, got '{layout}'")
+
+    # Resolve figsize via theme (once, before dispatching to sub-functions)
+    figsize = _resolve_figsize(figsize)
     
     # Mode 4: Fitted regression model (check for resid attribute)
     if hasattr(input_data, 'resid'):
@@ -252,7 +255,12 @@ def _hist_single(
     """Create a single histogram with optional normal overlay."""
     # Get the variable name if xlab is not provided
     if xlab is None:
-        xlab = str(vector.name)
+        xlab = "Value"
+
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
     
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
@@ -273,9 +281,10 @@ def _hist_single(
         ax.legend()
     
     # Set titles and labels
-    ax.set_title(title)
-    ax.set_xlabel(xlab)
-    ax.set_ylabel(ylab)
+    ax.set_title(title, fontsize=title_fontsize)
+    ax.set_xlabel(xlab, fontsize=label_fontsize)
+    ax.set_ylabel(ylab, fontsize=label_fontsize)
+    ax.tick_params(labelsize=tick_fontsize)
     
     plt.tight_layout()
     
@@ -350,13 +359,14 @@ def _hists(
             )
         formula_for_parse = _ensure_no_intercept(input_data)
         Y_out, X_out = parse_formula(formula_for_parse, data)
-        
+
         # Build with X-then-Y ordering and preserve index
-        y_name = getattr(Y_out, "name", "Y")
-        plot_data = pd.concat(
-            [X_out, pd.Series(np.asarray(Y_out).ravel(), index=X_out.index, name=y_name)],
-            axis=1
-        )
+        if Y_out is not None:
+            y_name = Y_out.name if isinstance(Y_out, pd.Series) else "Y"
+            Y_series = Y_out if isinstance(Y_out, pd.Series) else pd.Series(Y_out, name=y_name, index=X_out.index)
+            plot_data = pd.concat([X_out, Y_series], axis=1)
+        else:
+            plot_data = X_out
     
     # Replace infinite values with NaN (don't mutate original)
     plot_data = plot_data.replace([np.inf, -np.inf], np.nan)
@@ -381,12 +391,18 @@ def _hists(
     
     # Set figure size if not provided
     if figsize is None:
-        figsize = (5 * ncols, 5 * nrows)
+        theme_base = get_theme().get("figsize") or plt.rcParams["figure.figsize"]
+        figsize = (theme_base[0] / 2 * ncols, theme_base[1] / 2 * nrows)
     
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
+
     fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
     axes = np.array(axes).reshape(-1)  # Flatten the axes array for easy iteration
     
-    fig.suptitle(title, fontsize=16)
+    fig.suptitle(title, fontsize=title_fontsize)
     
     for i, var in enumerate(plot_data.columns):
         ax = axes[i]
@@ -406,9 +422,10 @@ def _hists(
             )
         
         # Set individual titles and labels
-        ax.set_title(f'Histogram of {var}')
-        ax.set_xlabel(xlab if xlab else var)
-        ax.set_ylabel(ylab)
+        ax.set_title(f'Histogram of {var}', fontsize=title_fontsize)
+        ax.set_xlabel(xlab if xlab else var, fontsize=label_fontsize)
+        ax.set_ylabel(ylab, fontsize=label_fontsize)
+        ax.tick_params(labelsize=tick_fontsize)
     
     # Remove any unused subplots in the matrix layout
     for j in range(i + 1, len(axes)):
@@ -482,6 +499,11 @@ def _hist_res(
     
     # Get residuals (same as plot())
     residuals = _get_residuals(model, res)
+
+    _theme = get_theme()
+    title_fontsize = _theme["title_fontsize"]
+    label_fontsize = _theme["label_fontsize"]
+    tick_fontsize  = _theme["tick_fontsize"]
     
     # Adjust title if it's the default
     if title == "Histogram of Residuals" and res != "resid":
@@ -511,9 +533,10 @@ def _hist_res(
         ax.legend(loc="best", framealpha=0.9)
     
     # Set title and labels
-    ax.set_title(title)
-    ax.set_xlabel(xlab)
-    ax.set_ylabel(ylab)
+    ax.set_title(title, fontsize=title_fontsize)
+    ax.set_xlabel(xlab, fontsize=label_fontsize)
+    ax.set_ylabel(ylab, fontsize=label_fontsize)
+    ax.tick_params(labelsize=tick_fontsize)
     
     plt.tight_layout()
     
@@ -600,4 +623,3 @@ def _plot_normal_overlay(
         kw.update(line_kwargs)
 
     ax.plot(x, y, **kw)
-

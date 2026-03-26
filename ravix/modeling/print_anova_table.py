@@ -2,6 +2,42 @@ import numpy as np
 import pandas as pd
 from ravix.modeling.format_utils import format_sigfigs, format_r_style, format_pvalue
 
+def format_anova_squares(value):
+    """
+    Format Sum of Squares and Mean Squares for ANOVA tables.
+    
+    Rules:
+    - Use scientific notation (4 sig figs) if value >= 100,000 or < 0.001
+    - Otherwise if < 0.1: show 4 significant figures
+    - Otherwise: show 5 significant figures
+    """
+    if value == '' or value == 0:
+        return value
+    
+    try:
+        val = float(value)
+    except (ValueError, TypeError):
+        return value
+    
+    abs_val = abs(val)
+    
+    # Scientific notation for very large or very small values
+    if abs_val >= 100000 or (abs_val < 0.001 and abs_val > 0):
+        # Format with 4 significant figures in scientific notation
+        exp = int(np.floor(np.log10(abs_val)))
+        mantissa = val / (10 ** exp)
+        # Round mantissa to 4 significant figures
+        mantissa_rounded = round(mantissa, 3)
+        return f"{mantissa_rounded:.3f}e{exp:+03d}"
+    
+    # For values < 0.1: use 4 significant figures
+    elif abs_val < 0.1:
+        return format_sigfigs(val, 4)
+    
+    # For values >= 0.1: use 5 significant figures
+    else:
+        return format_sigfigs(val, 5)
+
 def print_anova_table(model, typ=None):
     """
     Prints the ANOVA table for a given model.
@@ -91,15 +127,18 @@ def print_anova_table(model, typ=None):
         
         # Create DataFrame
         anova_df = pd.DataFrame(results, 
-                                columns=['df', 'Sum Sq', 'Mean Sq', 'F', 'Pr(>F)'],
+                                columns=['df', 'Sum Sq', 'Mean Sq', 'F', 'p-value'],
                                 index=var_names)
         
         # Apply formatting to numeric columns
-        for col in ['Sum Sq', 'Mean Sq', 'F']:
-            anova_df[col] = anova_df[col].apply(format_r_style)
+        for col in ['Sum Sq', 'Mean Sq']:
+            anova_df[col] = anova_df[col].apply(format_anova_squares)
+        
+        # Format F-statistic
+        anova_df['F'] = anova_df['F'].apply(format_r_style)
         
         # Special formatting for p-values
-        anova_df['Pr(>F)'] = anova_df['Pr(>F)'].apply(format_pvalue)
+        anova_df['p-value'] = anova_df['p-value'].apply(format_pvalue)
         
         return anova_df
     
@@ -132,14 +171,17 @@ def print_anova_table(model, typ=None):
         'Sum Sq': [ssm, ssr, sst],
         'Mean Sq': [msm, msr, ''],
         'F': [f_statistic, '', ''],
-        'Pr(>F)': [f_p_value, '', '']
+        'p-value': [f_p_value, '', '']
     }, index=['Regression', 'Residual', 'Total'])
     
     # Apply formatting to numeric columns
-    for col in ['Sum Sq', 'Mean Sq', 'F']:
-        anova_table[col] = anova_table[col].apply(format_r_style)
+    for col in ['Sum Sq', 'Mean Sq']:
+        anova_table[col] = anova_table[col].apply(format_anova_squares)
+    
+    # Format F-statistic
+    anova_table['F'] = anova_table['F'].apply(format_r_style)
     
     # Special formatting for p-values
-    anova_table['Pr(>F)'] = anova_table['Pr(>F)'].apply(format_pvalue)
+    anova_table['p-value'] = anova_table['p-value'].apply(format_pvalue)
     
     return anova_table

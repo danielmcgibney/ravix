@@ -94,11 +94,11 @@ def shapiro(
     if not return_dict:
         # Print the test details
         print("Shapiro-Wilk Test for Normality")
-        print("========================================")
+        print("=======================================================")
         print(f"Test Statistic      : {stat:.4f}")
         print(f"p-value             : {p_value:.4g}")
         print(f"Result              : {result}")
-        print("========================================")
+        print("=======================================================")
     else:
         return {
             'test_statistic': stat,
