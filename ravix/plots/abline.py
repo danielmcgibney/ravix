@@ -59,24 +59,18 @@ def abline(
     Examples
     --------
     Add a regression line from a fitted model:
-    >>> plot("y ~ x", data=df, show=False)
-    >>> abline(fitted_model)  # positional
-    >>> plt.show()
+    >>> plot("y ~ x", data=df)
+    >>> abline(fitted_model)  
     
     Add a line with specific slope and intercept:
-    >>> plot("y ~ x", data=df, show=False)
+    >>> plot("y ~ x", data=df)
     >>> abline(2, 0.5)  # positional: a=2, b=0.5
     >>> # or abline(a=2, b=0.5)  # keyword
-    >>> plt.show()
-    
-    Simple usage (may require same cell in Jupyter):
-    >>> plot("y ~ x", data=df)
-    >>> abline(fitted_model)
 
     Notes
     -----
     - Designed for layering on top of ravix plot()
-    - For reliable behavior in all environments, use show=False with plot()
+    - Make sure you created a scatter plot with ravix.plot() before calling abline()
     - In Jupyter notebooks, put plot() and abline() in the same cell
     """
 
@@ -127,12 +121,10 @@ def abline(
             linewidth=linewidth,
             label=label,
             zorder=5,  # Place above scatter (seaborn default is 1)
+            scalex=False,
+            scaley=False,
             **kwargs
         )[0]
-
-        # Expand axis limits if needed
-        ax.relim()
-        ax.autoscale_view()
 
         return line
 
@@ -206,12 +198,10 @@ def abline(
             linewidth=linewidth,
             label=label,
             zorder=5,  # Place above scatter (seaborn default is 1)
+            scalex=False,
+            scaley=False,
             **kwargs
         )[0]
-
-        # Expand axis limits if needed
-        ax.relim()
-        ax.autoscale_view()
 
         return line
 
@@ -223,10 +213,9 @@ def abline(
     if len(x_data) == 0:
         raise ValueError(
             "Cannot fit regression line: no scatter data found in current axes.\n"
-            "Make sure you called plot() with show=False before calling abline():\n"
-            "  fig, ax = plot('Y ~ X', data=df, show=False)\n"
+            "Make sure you created a scatter plot with ravix.plot() before calling abline().\n"
+            "  plot('Y ~ X', data = df)\n"
             "  abline()  # auto-fits to scatter data\n"
-            "  plt.show()"
         )
 
     x_arr = np.array(x_data)
@@ -246,12 +235,10 @@ def abline(
         linewidth=linewidth,
         label=label,
         zorder=5,  # Place above scatter (seaborn default is 1)
+        scalex=False,
+        scaley=False,
         **kwargs
     )[0]
-
-    # Expand axis limits if needed
-    ax.relim()
-    ax.autoscale_view()
 
     return line
 

@@ -93,10 +93,9 @@ def plot(
     >>> plot("mpg ~ hp", data=mtcars)
     
     >>> # Add regression line using abline
-    >>> plot("mpg ~ hp", data=mtcars, show=False)
+    >>> plot("mpg ~ hp", data=mtcars)
     >>> abline(fitted_model)
-    >>> plt.show()
-    
+
     >>> # Residual diagnostics
     >>> fitted_model = fit("y ~ x", data=df)
     >>> plot(fitted_model, res="studentized")

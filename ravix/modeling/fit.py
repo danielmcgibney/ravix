@@ -68,16 +68,24 @@ def _fit_matrices(Y, X, method: str, **kwargs):
     
     fitted._statsmodels_summary = original_summary
     
-    def summary_wrapper(out='simple', alpha=0.05, format='text'):
+    def summary_wrapper(out='simple', alpha=None, level=None, format='text'):
         """
         Generate a formatted summary of the model.
         
         Parameters
         ----------
         out : str, default='simple'
-            Format: 'simple', 'r', 'stata', 'coefficients', 'anova', 'anova_lm'
-        alpha : float, default=0.05
-            Significance level for confidence intervals
+            Output style: 'simple', 'statsmodels', 'r', 'stata',
+            'coefficients', 'confint', 'anova', or 'anova1'
+        alpha : float, optional
+            Significance level for confidence intervals (0 < alpha < 1). If
+            neither alpha nor level is specified, the default significance
+            level is 0.05. If both are specified, level takes precedence.
+        level : float, optional
+            Confidence level for confidence intervals (0 < level < 1). If
+            neither alpha nor level is specified, the default confidence
+            level is 0.95. If both are specified, a warning is issued and
+            level takes precedence.
         format : str, default='text'
             Output: 'text', 'latex', or 'df'
         
@@ -86,12 +94,13 @@ def _fit_matrices(Y, X, method: str, **kwargs):
         >>> model.summary()  # Simple format
         >>> model.summary(out='r', format='latex')  # R-style LaTeX
         >>> df = model.summary(out='coefficients', format='df')
+        >>> model.summary(out='coefficients', level=0.99)  # 99% CI
         
         See Also
         --------
         ravix.summary : Full documentation of all output formats
         """
-        return summary_function(fitted, out=out, alpha=alpha, format=format)
+        return summary_function(fitted, out=out, alpha=alpha, level=level, format=format)
     
     fitted.summary = summary_wrapper
     
@@ -234,7 +243,7 @@ def ols(formula: str, data: Optional[pd.DataFrame] = None, **kwargs) -> sm.regre
         
         **Enhanced Methods:**
         - model.predict(newdata) - make predictions on new data
-        - model.summary(out='simple', alpha=0.05, format='text') - custom summary outputs
+        - model.summary(out='simple', alpha=None, level=None, format='text') - custom summary outputs
         
         **Standard statsmodels methods:**
         - model.params : estimated coefficients
@@ -330,7 +339,7 @@ def logistic(formula: str, data: Optional[pd.DataFrame] = None, **kwargs):
         
         **Enhanced Methods:**
         - model.predict(newdata) - make predictions on new data
-        - model.summary(out='simple', alpha=0.05, format='text') - custom summary outputs
+        - model.summary(out='simple', alpha=None, level=None, format='text') - custom summary outputs
         
         **Standard statsmodels methods:**
         - model.params : estimated coefficients (log-odds scale)
@@ -430,7 +439,7 @@ def poisson(formula: str, data: Optional[pd.DataFrame] = None, **kwargs):
         
         **Enhanced Methods:**
         - model.predict(newdata) - make predictions on new data
-        - model.summary(out='simple', alpha=0.05, format='text') - custom summary outputs
+        - model.summary(out='simple', alpha=None, level=None, format='text') - custom summary outputs
         
         **Standard statsmodels methods:**
         - model.params : estimated coefficients (log scale)

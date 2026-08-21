@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import warnings
+from scipy.stats import chi2
 
 from ravix.modeling.format_utils import format_sigfigs, format_r_style, format_pvalue, significance_code
 from ravix.modeling.print_anova_table import print_anova_table
@@ -344,7 +345,7 @@ def render_coef_table(df) -> str:
 # Main Summary Function
 # ============================================================================
 
-def summary(model, out='simple', alpha=0.05, level=None, format='text', **kwargs):
+def summary(model, out='simple', alpha=None, level=None, format='text', **kwargs):
     """
     Generate and print a summary of a regression model.
     
@@ -366,13 +367,14 @@ def summary(model, out='simple', alpha=0.05, level=None, format='text', **kwargs
         - 'anova' or 'anova2': Type II ANOVA table
         - 'anova1': Type I (sequential) ANOVA table
     alpha : float, optional
-        Significance level for hypothesis tests (0 < alpha < 1).
-        If not provided, derived from level parameter (alpha = 1 - level).
-        Default is 0.05 if neither alpha nor level is specified.
+        Significance level for hypothesis tests (0 < alpha < 1). If neither
+        alpha nor level is specified, the default significance level is 0.05.
+        If both are specified, a warning is issued and level takes precedence.
     level : float, optional
-        Confidence level for confidence intervals (0 < level < 1).
-        If not provided, derived from alpha parameter (level = 1 - alpha).
-        Default is 0.95 if neither alpha nor level is specified.
+        Confidence level for confidence intervals (0 < level < 1). If neither
+        alpha nor level is specified, the default confidence level is 0.95.
+        If both are specified, a warning is issued and level takes precedence,
+        with alpha determined as 1 - level.
     format : str, default='text'
         Output format:
         - 'text': Print formatted text to console (default behavior)
@@ -392,7 +394,7 @@ def summary(model, out='simple', alpha=0.05, level=None, format='text', **kwargs
     ------
     ValueError
         If model type is unsupported, output format is invalid,
-        or if both alpha and level are provided and don't sum to 1
+        or if alpha or level is outside (0, 1)
         
     Examples
     --------
@@ -405,27 +407,29 @@ def summary(model, out='simple', alpha=0.05, level=None, format='text', **kwargs
     >>> latex_str = ravix.summary(model, format='latex')  # LaTeX output
     >>> df = ravix.summary(model, format='df')  # DataFrame output
     """
-    # Handle alpha and level parameters
-    if level is None:
-        # Only alpha provided (default or explicit)
-        if not (0 < alpha < 1):
-            raise ValueError(f"alpha must be between 0 and 1, got {alpha}")
-        level = 1 - alpha
-    else:
-        # level is provided
+    # alpha and level are two ways of specifying the same interval.
+    # If neither is supplied, use the conventional 95% confidence level
+    # (equivalently alpha = 0.05). If both are supplied, warn and let level
+    # take precedence because it directly expresses the requested confidence.
+    if alpha is not None and level is not None:
+        warnings.warn(
+            "Both alpha and level were specified. level takes precedence, "
+            "and alpha will be ignored.",
+            UserWarning,
+            stacklevel=2
+        )
+
+    if level is not None:
         if not (0 < level < 1):
             raise ValueError(f"level must be between 0 and 1, got {level}")
-        # Check if alpha was also explicitly provided (not default)
-        if alpha != 0.05:  # If alpha was changed from default
-            # Both provided: ensure they sum to 1
-            if not np.isclose(alpha + level, 1.0, atol=1e-10):
-                raise ValueError(
-                    f"When both alpha and level are provided, they must sum to 1. "
-                    f"Got alpha={alpha}, level={level}, sum={alpha + level}"
-                )
-        else:
-            # Only level provided, derive alpha
-            alpha = 1 - level
+        # Round to prevent ordinary binary floating-point noise from appearing
+        # in confidence-level labels and other user-facing output.
+        alpha = round(1 - level, 10)
+    elif alpha is not None:
+        if not (0 < alpha < 1):
+            raise ValueError(f"alpha must be between 0 and 1, got {alpha}")
+    else:
+        alpha = 0.05
 
     format = format.lower()
     if format not in ['text', 'latex', 'dataframe', 'df']:
@@ -435,14 +439,23 @@ def summary(model, out='simple', alpha=0.05, level=None, format='text', **kwargs
     
     # Handle native statsmodels output
     if out in ['statsmodels', 'stats']:
+        native_summary = getattr(model, '_statsmodels_summary', None)
+
+        if native_summary is None:
+            # Allows ravix.summary() to also work with a raw statsmodels model
+            native_summary = model.summary
+
+        sm_summary = native_summary(alpha=alpha)
+
         if format == 'text':
-            print(model.summary(alpha=alpha))
+            print(sm_summary)
             return None
         elif format == 'latex':
-            return model.summary(alpha=alpha).as_latex()
-        else:  # dataframe/df
-            # Return coefficient table as DataFrame
-            return _get_coefficient_table(model, alpha, r_style_labels=False)
+            return sm_summary.as_latex()
+        else:
+            return _get_coefficient_table(
+                model, alpha, r_style_labels=False
+            )
     
     # Dispatch to appropriate summary function based on model type
     model_type = _get_model_type(model)
@@ -533,8 +546,6 @@ def _get_model_type(model):
     if hasattr(model, 'model'):
         if isinstance(model.model, sm.OLS):
             return "ols"
-        elif isinstance(model.model, sm.Logit):
-            return "logit"
         elif isinstance(model.model, sm.GLM):
             if isinstance(model.model.family, sm.families.Binomial):
                 return "logit"
@@ -678,14 +689,19 @@ def _get_coefficient_table(model, alpha, r_style_labels=False):
         'std err': model.bse,
     }
 
-    # Add appropriate test statistic and p-value columns
+    # Add appropriate test statistic and p-value columns.
+    # Note: statsmodels GLM results always expose a `tvalues` attribute,
+    # even when inference is actually z-based (use_t=False) - so a
+    # hasattr(model, 'tvalues') check alone can't distinguish t-tests from
+    # z-tests. `use_t` is the flag that actually says which one applies.
     if hasattr(model, 'tvalues'):
-        coef_data['t'] = model.tvalues
-        p_col_name = 'P>|t|'
-        coef_data[p_col_name] = model.pvalues
-    elif hasattr(model, 'zvalues'):
-        coef_data['z'] = model.zvalues
-        p_col_name = 'P>|z|'
+        use_t = bool(getattr(model, 'use_t', False))
+        if use_t:
+            coef_data['t'] = model.tvalues
+            p_col_name = 'P>|t|'
+        else:
+            coef_data['z'] = model.tvalues
+            p_col_name = 'P>|z|'
         coef_data[p_col_name] = model.pvalues
     else:
         # Fallback for models without explicit test statistics
@@ -841,13 +857,16 @@ def _format_coefficient_table(model, alpha, format='text'):
         'Std. Error': model.bse
     }
     
-    # Add appropriate test statistic column
+    # Add appropriate test statistic column. See _get_coefficient_table for
+    # why this checks use_t rather than hasattr(model, 'zvalues').
     if hasattr(model, 'tvalues'):
-        coef_data['t value'] = model.tvalues
-        coef_data['Pr(>|t|)'] = model.pvalues
-    elif hasattr(model, 'zvalues'):
-        coef_data['z value'] = model.zvalues
-        coef_data['Pr(>|z|)'] = model.pvalues
+        use_t = bool(getattr(model, 'use_t', False))
+        if use_t:
+            coef_data['t value'] = model.tvalues
+            coef_data['Pr(>|t|)'] = model.pvalues
+        else:
+            coef_data['z value'] = model.tvalues
+            coef_data['Pr(>|z|)'] = model.pvalues
     
     coef_df = pd.DataFrame(coef_data)
     coef_df[_SIG_COL] = coef_df.iloc[:, -1].apply(significance_code)  # Last p-value column
@@ -1002,13 +1021,79 @@ def _build_stata_anova_header(model, stats):
 # Logistic Regression Summary Functions
 # ============================================================================
 
+def _extract_glm_statistics(model):
+    """
+    Extract key statistics for logistic and Poisson GLMs.
+
+    Notes
+    -----
+    - BIC uses the likelihood-based definition (`bic_llf`) rather than
+      `model.bic`, which for GLM results is deviance-based and can be a
+      large negative number wildly out of step with AIC on the same model.
+      statsmodels documents this discrepancy directly and exposes
+      `bic_llf` as the likelihood-based alternative.
+    - Adds a likelihood-ratio chi-square test against the intercept-only
+      model, the GLM analogue of OLS's overall F-test.
+    """
+    try:
+        pseudo_r2 = model.pseudo_rsquared(kind='cs')
+    except (AttributeError, TypeError):
+        pseudo_r2 = None
+
+    # Likelihood-ratio test against intercept-only model
+    lr_df = int(model.df_model)
+    try:
+        if lr_df > 0:
+            lr_stat = 2 * (model.llf - model.llnull)
+            lr_pvalue = chi2.sf(lr_stat, lr_df)
+        else:
+            lr_stat, lr_pvalue = np.nan, np.nan
+    except AttributeError:
+        # llnull unavailable for this model/family
+        lr_stat, lr_pvalue = np.nan, np.nan
+
+    # Always use likelihood-based BIC (see docstring above). len(model.params)
+    # is used rather than df_model + 1 so this stays correct for no-intercept
+    # fits too, not just the intercept-included case df_model + 1 assumes.
+    bic = getattr(
+        model,
+        'bic_llf',
+        -2 * model.llf + np.log(model.nobs) * len(model.params)
+    )
+
+    return {
+        'n_obs': int(model.nobs),
+        'df_model': int(model.df_model),
+        'df_resid': int(model.df_resid),
+
+        'log_likelihood': model.llf,
+        'deviance': model.deviance,
+        'pseudo_r_squared': pseudo_r2,
+        'aic': model.aic,
+        'bic': bic,
+
+        'lr_statistic': lr_stat,
+        'lr_df': lr_df,
+        'lr_p_value': lr_pvalue,
+
+        'log_likelihood_fmt': format_r_style(model.llf),
+        'deviance_fmt': format_r_style(model.deviance),
+        'pseudo_r_squared_fmt': f"{pseudo_r2:.4f}" if pseudo_r2 is not None else "N/A",
+        'aic_fmt': format_r_style(model.aic),
+        'bic_fmt': format_r_style(bic),
+
+        'lr_statistic_fmt': format_r_style(lr_stat) if not np.isnan(lr_stat) else "N/A",
+        'lr_p_value_fmt': format_pvalue(lr_pvalue) if not np.isnan(lr_pvalue) else "N/A",
+    }
+
+
 def _print_logistic_summary(model, out, alpha, format='text'):
     """
     Generate summary output for logistic regression models.
     
     Parameters
     ----------
-    model : statsmodels Logit result
+    model : statsmodels GLM result with Binomial family
         Fitted logistic regression model
     out : str
         Output format type
@@ -1027,29 +1112,12 @@ def _print_logistic_summary(model, out, alpha, format='text'):
         warnings.simplefilter("ignore", FutureWarning)
         warnings.simplefilter("ignore", sm.tools.sm_exceptions.ConvergenceWarning)
         
-        # Get coefficient table
-        summary_df = _get_coefficient_table(model, alpha)
-        
-        # Extract statistics with robust handling of pseudo R-squared
-        try:
-            pseudo_r2 = model.pseudo_rsquared(kind='cs')
-            pseudo_r2_fmt = format_r_style(pseudo_r2)
-        except (AttributeError, TypeError):
-            # Fallback if pseudo_rsquared not available (e.g., some GLM results)
-            pseudo_r2 = None
-            pseudo_r2_fmt = "N/A"
-        
-        stats = {
-            'n_obs': int(model.nobs),
-            'log_likelihood': model.llf,
-            'aic': model.aic,
-            'bic': model.bic,
-            'pseudo_r_squared': pseudo_r2,
-            'log_likelihood_fmt': format_r_style(model.llf),
-            'aic_fmt': format_r_style(model.aic),
-            'bic_fmt': format_r_style(model.bic),
-            'pseudo_r_squared_fmt': pseudo_r2_fmt
-        }
+        # Get coefficient table (R-style labels for 'simple', matching OLS's
+        # convention, so LaTeX/DataFrame column names are consistent across
+        # OLS, logistic, and Poisson for the same out value)
+        summary_df = _get_coefficient_table(model, alpha, r_style_labels=(out == 'simple'))
+
+        stats = _extract_glm_statistics(model)
     
     # Route to appropriate output format
     if out == 'r':
@@ -1077,9 +1145,13 @@ def _format_simple_logistic_summary(summary_df, stats, format='text'):
     if format in ['dataframe', 'df']:
         result_df = summary_df.copy()
         result_df.attrs['log_likelihood'] = stats['log_likelihood']
+        result_df.attrs['deviance'] = stats['deviance']
         result_df.attrs['pseudo_r_squared'] = stats['pseudo_r_squared']
         result_df.attrs['aic'] = stats['aic']
         result_df.attrs['bic'] = stats['bic']
+        result_df.attrs['lr_statistic'] = stats['lr_statistic']
+        result_df.attrs['lr_df'] = stats['lr_df']
+        result_df.attrs['lr_p_value'] = stats['lr_p_value']
         return result_df
     
     # Build LaTeX output
@@ -1091,10 +1163,15 @@ def _format_simple_logistic_summary(summary_df, stats, format='text'):
         latex_parts.append(display_df.to_latex())
         latex_parts.append("\n\\subsection*{Model Statistics}")
         latex_parts.append("\\begin{itemize}")
+        latex_parts.append(f"\\item Deviance: {stats['deviance_fmt']}")
+        latex_parts.append(f"\\item Pseudo R-squared (CS): {stats['pseudo_r_squared_fmt']}")
         latex_parts.append(f"\\item Log-Likelihood: {stats['log_likelihood_fmt']}")
-        latex_parts.append(f"\\item Pseudo R-squared: {stats['pseudo_r_squared_fmt']}")
         latex_parts.append(f"\\item AIC: {stats['aic_fmt']}")
         latex_parts.append(f"\\item BIC: {stats['bic_fmt']}")
+        latex_parts.append(
+            f"\\item LR chi-square: {stats['lr_statistic_fmt']} on "
+            f"{stats['lr_df']} DF, p-value: {stats['lr_p_value_fmt']}"
+        )
         latex_parts.append("\\end{itemize}")
         content = '\n'.join(latex_parts)
         return _handle_output(content, format)
@@ -1110,8 +1187,13 @@ def _format_simple_logistic_summary(summary_df, stats, format='text'):
     output.append(coef_str)
     output.append("\nModel Statistics:")
     output.append("-" * w)
-    output.append(f"Log-Likelihood: {stats['log_likelihood_fmt']:<16}AIC: {stats['aic_fmt']}")
-    output.append(f"Pseudo R-squared: {stats['pseudo_r_squared_fmt']:<14}BIC: {stats['bic_fmt']}")
+    output.append(f"{'Deviance:':<23}{stats['deviance_fmt']:<9}AIC: {stats['aic_fmt']}")
+    output.append(f"{'Pseudo R-squared (CS):':<23}{stats['pseudo_r_squared_fmt']:<9}BIC: {stats['bic_fmt']}")
+    output.append(f"{'Log-Likelihood:':<23}{stats['log_likelihood_fmt']}")
+    output.append(
+        f"LR chi-square: {stats['lr_statistic_fmt']} on {stats['lr_df']} DF, "
+        f"p-value: {stats['lr_p_value_fmt']}"
+    )
     output.append("=" * w)
     
     content = '\n'.join(output)
@@ -1147,40 +1229,16 @@ def _print_poisson_summary(model, out, alpha, format='text'):
         warnings.simplefilter("ignore", FutureWarning)
         warnings.simplefilter("ignore", sm.tools.sm_exceptions.ConvergenceWarning)
         
-        # Get coefficient table
-        summary_df = _get_coefficient_table(model, alpha)
-        
-        # Extract statistics with robust handling of pseudo R-squared
-        try:
-            pseudo_r2 = model.pseudo_rsquared(kind='cs')
-            pseudo_r2_fmt = format_r_style(pseudo_r2)
-        except (AttributeError, TypeError):
-            # Fallback if pseudo_rsquared not available
-            pseudo_r2 = None
-            pseudo_r2_fmt = "N/A"
-        
-        # Calculate deviance statistics
-        deviance = model.deviance
-        null_deviance = model.null_deviance
-        
-        stats = {
-            'n_obs': int(model.nobs),
-            'log_likelihood': model.llf,
-            'aic': model.aic,
-            'bic': model.bic,
-            'deviance': deviance,
-            'null_deviance': null_deviance,
-            'pseudo_r_squared': pseudo_r2,
-            'df_model': int(model.df_model),
-            'df_resid': int(model.df_resid),
-            # Formatted versions
-            'log_likelihood_fmt': format_r_style(model.llf),
-            'aic_fmt': format_r_style(model.aic),
-            'bic_fmt': format_r_style(model.bic),
-            'deviance_fmt': format_r_style(deviance),
-            'null_deviance_fmt': format_r_style(null_deviance),
-            'pseudo_r_squared_fmt': pseudo_r2_fmt
-        }
+        # Get coefficient table (R-style labels for 'simple', matching OLS's
+        # convention, so LaTeX/DataFrame column names are consistent across
+        # OLS, logistic, and Poisson for the same out value)
+        summary_df = _get_coefficient_table(model, alpha, r_style_labels=(out == 'simple'))
+
+        stats = _extract_glm_statistics(model)
+        # Keep null_deviance available for dataframe/attrs consumers even
+        # though it's no longer printed in the text/latex summary.
+        stats['null_deviance'] = model.null_deviance
+        stats['null_deviance_fmt'] = format_r_style(model.null_deviance)
     
     # Route to appropriate output format
     if out == 'r':
@@ -1213,6 +1271,9 @@ def _format_simple_poisson_summary(summary_df, stats, format='text'):
         result_df.attrs['bic'] = stats['bic']
         result_df.attrs['deviance'] = stats['deviance']
         result_df.attrs['null_deviance'] = stats['null_deviance']
+        result_df.attrs['lr_statistic'] = stats['lr_statistic']
+        result_df.attrs['lr_df'] = stats['lr_df']
+        result_df.attrs['lr_p_value'] = stats['lr_p_value']
         return result_df
     
     # Build LaTeX output
@@ -1220,17 +1281,19 @@ def _format_simple_poisson_summary(summary_df, stats, format='text'):
         display_df = _format_coef_df_for_display(summary_df)
         latex_parts = []
         latex_parts.append("\\section*{Summary of Poisson Regression Analysis}")
-        latex_parts.append("\n\\subsection*{Coefficients (Log-Rate)}")
+        latex_parts.append("\n\\subsection*{Coefficients (Log Mean)}")
         latex_parts.append(display_df.to_latex())
         latex_parts.append("\n\\subsection*{Model Statistics}")
         latex_parts.append("\\begin{itemize}")
-        latex_parts.append(f"\\item Log-Likelihood: {stats['log_likelihood_fmt']}")
         latex_parts.append(f"\\item Deviance: {stats['deviance_fmt']}")
-        latex_parts.append(f"\\item Null Deviance: {stats['null_deviance_fmt']}")
-        latex_parts.append(f"\\item Pseudo R-squared: {stats['pseudo_r_squared_fmt']}")
+        latex_parts.append(f"\\item Pseudo R-squared (CS): {stats['pseudo_r_squared_fmt']}")
+        latex_parts.append(f"\\item Log-Likelihood: {stats['log_likelihood_fmt']}")
         latex_parts.append(f"\\item AIC: {stats['aic_fmt']}")
         latex_parts.append(f"\\item BIC: {stats['bic_fmt']}")
-        latex_parts.append(f"\\item Degrees of Freedom: {stats['df_model']} (Model), {stats['df_resid']} (Residual)")
+        latex_parts.append(
+            f"\\item LR chi-square: {stats['lr_statistic_fmt']} on "
+            f"{stats['lr_df']} DF, p-value: {stats['lr_p_value_fmt']}"
+        )
         latex_parts.append("\\end{itemize}")
         content = '\n'.join(latex_parts)
         return _handle_output(content, format)
@@ -1241,16 +1304,18 @@ def _format_simple_poisson_summary(summary_df, stats, format='text'):
     output = []
     output.append("Summary of Poisson Regression Analysis:")
     output.append("=" * w)
-    output.append("\nCoefficients (Log-Rate):")
+    output.append("\nCoefficients (Log Mean):")
     output.append("-" * w)
     output.append(coef_str)
     output.append("\nModel Statistics:")
     output.append("-" * w)
-    output.append(f"Log-Likelihood: {stats['log_likelihood_fmt']:<16}AIC: {stats['aic_fmt']}")
-    output.append(f"Deviance: {stats['deviance_fmt']:<22}BIC: {stats['bic_fmt']}")
-    output.append(f"Null Deviance: {stats['null_deviance_fmt']}")
-    output.append(f"Pseudo R-squared: {stats['pseudo_r_squared_fmt']}")
-    output.append(f"Degrees of Freedom: {stats['df_model']} (Model), {stats['df_resid']} (Residual)")
+    output.append(f"{'Deviance:':<23}{stats['deviance_fmt']:<9}AIC: {stats['aic_fmt']}")
+    output.append(f"{'Pseudo R-squared (CS):':<23}{stats['pseudo_r_squared_fmt']:<9}BIC: {stats['bic_fmt']}")
+    output.append(f"{'Log-Likelihood:':<23}{stats['log_likelihood_fmt']}")
+    output.append(
+        f"LR chi-square: {stats['lr_statistic_fmt']} on {stats['lr_df']} DF, "
+        f"p-value: {stats['lr_p_value_fmt']}"
+    )
     output.append("=" * w)
     
     content = '\n'.join(output)

@@ -1,2 +1,10 @@
+.DS_Store
+.Rhistory
+.idea/
+.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
 
-pregress/.DS_Store
+build/
+dist/
+*.egg-info/

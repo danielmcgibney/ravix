@@ -44,7 +44,7 @@ See [Applied Linear Regression for Business Analytics with Python](www.businessr
 import ravix
 
 # Load data from ravix
-df = ravix.get_data("Betas.csv")
+df = ravix.get_data("betas.csv")
 
 # Format the data (for later)
 df.drop(columns = df.columns[0], inplace=True)
@@ -96,13 +96,13 @@ ravix.boxplot("SPY ~ .", df)
 ravix.hist(df.SPY)
 
 # Multiple histograms
-ravix.hist("SPY ~ .",data = df)
+ravix.hist(df)
 
 # Scatter plot
 ravix.plot("MSFT ~ SPY", data = df)
 
 # Multiple Scatter plots
-ravix.plot("SPY ~ .", data = df)
+ravix.plot(df)
 
 # Correlation Plot
 ravix.plot_cor(df)

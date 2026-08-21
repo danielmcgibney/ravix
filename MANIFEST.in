@@ -1,9 +1,13 @@
 include LICENSE
 include README.md
+include HELP.md
 include requirements.txt
-include ravix/data/*.csv
 
 recursive-include ravix *.py
+recursive-include ravix/data *.csv
+
 global-exclude __pycache__ *.pyc *.pyo .DS_Store .Rhistory
 prune tests
 prune notebooks
+prune .idea
+prune ravix.egg-info
