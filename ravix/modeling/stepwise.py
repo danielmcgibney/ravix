@@ -1,4 +1,4 @@
-from .fit import _fit_matrices
+from .fit import _fit_matrices, _attach_formula_if_reconstructible
 from .parse_formula import parse_formula
 from types import SimpleNamespace
 
@@ -67,8 +67,12 @@ def stepwise(formula, data, method='ols', direction='backward', metric='aic',
         else:
             raise ValueError("Invalid metric")
 
-    # Parse to get variable names and transformed data
-    Y_out, X_out = parse_formula(formula, data)
+    # Parse to get variable names and transformed data. categorical_levels is
+    # populated as a side effect for any categorical predictor, and reused
+    # below to let predict() work on the final model wherever that's
+    # actually reconstructible.
+    categorical_levels = {}
+    Y_out, X_out = parse_formula(formula, data, categorical_levels=categorical_levels)
     Y_name = Y_out.name
     
     # Get actual column names from X_out
@@ -231,6 +235,13 @@ def stepwise(formula, data, method='ols', direction='backward', metric='aic',
             break
 
     final_variables = [v for v in selected if v not in ['Intercept', 'const']]
+    
+    # Enable predict() on the final model when the selected columns can be
+    # losslessly re-expressed as a formula (see _attach_formula_if_reconstructible
+    # for exactly when that is/isn't possible -- e.g. not when only some
+    # levels of a categorical predictor were selected).
+    response_term = formula.split('~', 1)[0].strip()
+    _attach_formula_if_reconstructible(best_model, response_term, categorical_levels)
     
     if verbose:
         #print(f"Final model variables: {final_variables}")

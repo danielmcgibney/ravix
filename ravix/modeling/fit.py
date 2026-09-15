@@ -115,7 +115,12 @@ def _fit_model(formula: str, data: Optional[pd.DataFrame], method: str, **kwargs
     """
     
     # Parse formula (parse_formula handles None data by looking at environment)
-    Y_out, X_out = parse_formula(formula, data)
+    # categorical_levels is populated as a side effect for any categorical
+    # predictor, capturing the exact categories/order used for dummy
+    # encoding -- stored on the fitted model below so predict() can
+    # reconstruct identical dummy columns from a partial slice of new data.
+    categorical_levels = {}
+    Y_out, X_out = parse_formula(formula, data, categorical_levels=categorical_levels)
     Y_name = Y_out.name
     
     # Ensure Y_out is a Series and retains its name
@@ -196,8 +201,90 @@ def _fit_model(formula: str, data: Optional[pd.DataFrame], method: str, **kwargs
     
     # Add formula metadata (not added by _fit_matrices)
     fitted.formula = formula
+    fitted._categorical_levels = categorical_levels
     
     return fitted
+
+
+def _attach_formula_if_reconstructible(model, response_term, categorical_levels):
+    """
+    Attach `.formula` and `._categorical_levels` to a model built via
+    `_fit_matrices` directly (bsr, stepwise) from a specific column subset,
+    so predict() can work on it exactly like an ols()/logistic()/poisson()
+    model -- but only when that column subset can actually be reproduced by
+    re-parsing a formula string.
+
+    That reconstruction is only valid when, for every categorical variable
+    involved, either ALL of its dummy columns are present in the selected
+    subset or NONE are -- selection algorithms that treat each dummy column
+    as an independent candidate (as bsr/stepwise currently do) can and do
+    produce models with only *some* of a categorical variable's levels
+    included, and there is no ravix formula that reproduces that. Interaction
+    terms are excluded from reconstruction for the same reason, conservatively.
+
+    When reconstruction isn't possible, no `.formula` is attached and
+    `model._predict_unsupported_reason` is set to a specific, actionable
+    explanation instead of leaving predict() to fail with a bare
+    AttributeError.
+
+    Returns True if formula support was attached, False otherwise.
+    """
+    selected = list(model.model.exog_names)
+    non_intercept = [c for c in selected if c not in ('Intercept', 'const')]
+    has_intercept = any(c in selected for c in ('Intercept', 'const'))
+
+    if any(':' in c for c in non_intercept):
+        model._predict_unsupported_reason = (
+            "this model includes an interaction term, and predict() support "
+            "for models built directly from a column subset (bsr/stepwise) "
+            "doesn't yet cover interactions."
+        )
+        return False
+
+    terms = []
+    consumed_categoricals = set()
+
+    for col in non_intercept:
+        matched_var = None
+        for var, levels in categorical_levels.items():
+            dummy_names = {f"{var}_{lvl}" for lvl in levels[1:]}  # levels[0] is the dropped baseline
+            if col in dummy_names:
+                matched_var = var
+                break
+
+        if matched_var is not None:
+            if matched_var in consumed_categoricals:
+                continue
+            expected = {f"{matched_var}_{lvl}" for lvl in categorical_levels[matched_var][1:]}
+            if not expected.issubset(set(non_intercept)):
+                missing = expected - set(non_intercept)
+                model._predict_unsupported_reason = (
+                    f"the selected predictors include only some levels of the categorical "
+                    f"variable '{matched_var}' ({sorted(expected - missing)}, missing "
+                    f"{sorted(missing)}) -- there is no formula that reproduces a partial "
+                    f"selection of one variable's categories. Refit with ravix.ols() and an "
+                    f"explicit formula if you need to predict from this subset."
+                )
+                return False
+            terms.append(matched_var)
+            consumed_categoricals.add(matched_var)
+        else:
+            terms.append(col)
+
+    if not terms:
+        model._predict_unsupported_reason = (
+            "this is an intercept-only model, which predict() support for "
+            "bsr/stepwise models doesn't yet cover."
+        )
+        return False
+
+    rhs = " + ".join(terms)
+    intercept_suffix = "" if has_intercept else " +0"
+    model.formula = f"{response_term} ~ {rhs}{intercept_suffix}"
+    model._categorical_levels = {
+        var: levels for var, levels in categorical_levels.items() if var in consumed_categoricals
+    }
+    return True
 
 
 def ols(formula: str, data: Optional[pd.DataFrame] = None, **kwargs) -> sm.regression.linear_model.RegressionResultsWrapper:

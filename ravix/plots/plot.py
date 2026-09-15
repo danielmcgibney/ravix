@@ -177,7 +177,7 @@ def plot(
 
         _plots(
             input_data,
-            color=_coerce_color_str(color, default="blue"),
+            color=color,
             lines=lines,
             title=title if title else "Scatter Plot Matrix",
             figsize=figsize,
@@ -206,7 +206,7 @@ def plot(
             # No LHS (e.g. "~ X1 + X2") — treat all RHS columns as the variables to plot
             _plots(
                 X_out,
-                color=_coerce_color_str(color, default="blue"),
+                color=color,
                 lines=lines,
                 title=title if title else "Scatter Plot Matrix",
                 figsize=figsize,
@@ -238,7 +238,7 @@ def plot(
         plot_data = pd.concat([Y_series, X_out], axis=1)
         _plots(
             plot_data,
-            color=_coerce_color_str(color, default="blue"),
+            color=color,
             lines=lines,
             title=title if title else "Scatter Plot Matrix",
             figsize=figsize,
@@ -455,6 +455,11 @@ def _plots(
 
     cols = data.columns.tolist()
     n = len(cols)
+    # Diagonal distributions use one fill; scatter panels retain point colors.
+    from matplotlib.colors import is_color_like
+    if color is None:
+        color = "blue"
+    diagonal_color = color if is_color_like(color) else "blue"
 
     # ── figure sizing ──────────────────────────────────────────────────────
     if figsize is None:
@@ -500,7 +505,7 @@ def _plots(
                 elif diag == "hist":
                     ax.hist(
                         data[col_i].dropna(),
-                        color=color,
+                        color=diagonal_color,
                         edgecolor="white",
                         linewidth=0.4,
                     )
@@ -513,11 +518,11 @@ def _plots(
                         vals = data[col_i].dropna().values.astype(float)
                         kde = gaussian_kde(vals)
                         xs = np.linspace(vals.min(), vals.max(), 200)
-                        ax.plot(xs, kde(xs), color=color, linewidth=1.8)
-                        ax.fill_between(xs, kde(xs), alpha=0.15, color=color)
+                        ax.plot(xs, kde(xs), color=diagonal_color, linewidth=1.8)
+                        ax.fill_between(xs, kde(xs), alpha=0.15, color=diagonal_color)
                     except Exception:
                         # Fall back to histogram if scipy unavailable
-                        ax.hist(data[col_i].dropna(), color=color,
+                        ax.hist(data[col_i].dropna(), color=diagonal_color,
                                 edgecolor="white", linewidth=0.4)
                     ax.set_xlabel("")
                     ax.set_ylabel("")

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from itertools import combinations
-from .fit import _fit_matrices
+from .fit import _fit_matrices, _attach_formula_if_reconstructible
 from .parse_formula import parse_formula
 from types import SimpleNamespace
 
@@ -28,8 +28,11 @@ def bsr(formula, data, max_var=8, metric="aic", method="ols", **kwargs):
             - n_subsets_tested: Total number of subsets successfully fitted
             - failed_subsets: List of subsets that failed to fit (if any)
     """
-    # Parse the formula
-    Y, X = parse_formula(formula, data)
+    # Parse the formula. categorical_levels is populated as a side effect for
+    # any categorical predictor, and reused below to let predict() work on
+    # the final selected model wherever that's actually reconstructible.
+    categorical_levels = {}
+    Y, X = parse_formula(formula, data, categorical_levels=categorical_levels)
     x_vars = X.columns
     
     # Use actual column names from X DataFrame
@@ -121,6 +124,13 @@ def bsr(formula, data, max_var=8, metric="aic", method="ols", **kwargs):
         X_best = pd.concat([X[['const']].copy(), X_best], axis=1)
     
     best_model = _fit_matrices(Y, X_best, method=method, **kwargs)
+    
+    # Enable predict() on the final model when the selected columns can be
+    # losslessly re-expressed as a formula (see _attach_formula_if_reconstructible
+    # for exactly when that is/isn't possible -- e.g. not when only some
+    # levels of a categorical predictor were selected).
+    response_term = formula.split('~', 1)[0].strip()
+    _attach_formula_if_reconstructible(best_model, response_term, categorical_levels)
     
     # Calculate best_by_k
     best_by_k = {}

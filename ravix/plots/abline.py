@@ -53,8 +53,8 @@ def abline(
 
     Returns
     -------
-    matplotlib.lines.Line2D
-        The plotted line object (for legend assembly)
+    None
+        The line is added directly to the target axes.
 
     Examples
     --------
@@ -126,7 +126,7 @@ def abline(
             **kwargs
         )[0]
 
-        return line
+        return None
 
     # ======================================================================
     # CASE 2: Ravix model → use predict()
@@ -178,12 +178,31 @@ def abline(
         # ------------------------------------------------------------------
         from ravix.modeling.predict import predict
 
-        try:
-            Y_pred = predict(model, X_pred)
-        except Exception as e:
-            raise ValueError(
-                f"Prediction failed inside abline(): {e}"
-            )
+        # Ravix scatter coordinates already contain formula transformations.
+        # A one-predictor OLS line must use those coordinates directly; passing
+        # them through predict() would transform the predictor a second time.
+        params = getattr(model, "params", None)
+        names = list(getattr(params, "index", []))
+        slopes = [name for name in names if name not in ("Intercept", "const")]
+        if (getattr(model, "model_type", None) == "ols"
+                and len(slopes) == 1 and slopes[0] == x_var_name):
+            intercept = params.get("Intercept", params.get("const", 0.0))
+            Y_pred = intercept + params[slopes[0]] * x_vals
+        else:
+            try:
+                Y_pred = predict(model, X_pred)
+            except Exception as e:
+                if not hasattr(ax, "_ravix_x_var"):
+                    raise ValueError(
+                        "abline() could not determine the correct predictor coordinates "
+                        "because the plot was not generated with ravix.plot(). "
+                        "Create the plot with ravix.plot() using the model's formula, "
+                        "then call abline(model). "
+                        f"Underlying prediction error: {e}"
+                    ) from e
+                raise ValueError(
+                    f"Prediction failed inside abline(): {e}"
+                ) from e
 
         y_vals = np.asarray(Y_pred).ravel()
 
@@ -203,7 +222,7 @@ def abline(
             **kwargs
         )[0]
 
-        return line
+        return None
 
     # ======================================================================
     # CASE 3: No arguments → fit OLS to scatter data
@@ -214,8 +233,8 @@ def abline(
         raise ValueError(
             "Cannot fit regression line: no scatter data found in current axes.\n"
             "Make sure you created a scatter plot with ravix.plot() before calling abline().\n"
-            "  plot('Y ~ X', data = df)\n"
-            "  abline()  # auto-fits to scatter data\n"
+            "  plot('Y ~ X', data=df)\n"
+            "  abline()  # auto-fits to scatter data"
         )
 
     x_arr = np.array(x_data)
@@ -240,7 +259,7 @@ def abline(
         **kwargs
     )[0]
 
-    return line
+    return None
 
 
 # ======================================================================

@@ -2,11 +2,10 @@ import numpy as np
 import pandas as pd
 import re
 import inspect
-from pandas.api.types import CategoricalDtype
 from itertools import combinations, product
 
 
-def parse_formula(formula, data=None, drop_first=True):
+def parse_formula(formula, data=None, drop_first=True, categorical_levels=None):
     """
     Parse a formula string and return Y and X for regression modeling.
     
@@ -14,6 +13,15 @@ def parse_formula(formula, data=None, drop_first=True):
         formula (str): Formula string like "Y ~ X1 + X2", "~ X1 + X2" (no response), or "Y" (no predictors)
         data (pd.DataFrame): DataFrame containing the variables
         drop_first (bool): Whether to drop first level of categorical variables
+        categorical_levels (dict, optional): Dual-purpose channel for categorical
+            dummy encoding. Pass an empty dict at fit time to have it populated
+            with {var_name: [categories, in dummy-encoding order]} for every
+            categorical predictor encountered. Pass a dict already containing a
+            variable's categories (e.g. one captured at fit time) to force that
+            variable's dummy encoding to use exactly those categories/order,
+            regardless of which categories are present in `data` -- this is
+            what lets predict() reproduce a fitted model's dummy columns from a
+            partial slice of new data (e.g. a single new observation).
         
     Returns:
         tuple: (Y, X) where:
@@ -84,7 +92,7 @@ def parse_formula(formula, data=None, drop_first=True):
     include_intercept, predictor_terms = _parse_predictors(predictors_part, data, response_var)
     
     # Build design matrix
-    X = _build_design_matrix(predictor_terms, include_intercept, data, response_var, drop_first)
+    X = _build_design_matrix(predictor_terms, include_intercept, data, response_var, drop_first, categorical_levels)
     
     return Y, X
 
@@ -94,12 +102,20 @@ def _parse_response(response_part):
     response_part = response_part.strip()
     
     # Check for power transformations first (e.g., "Y^2", "Y^0.5", "Y^(2)")
-    power_match = re.match(r'^(\w+)\^(\(?([\d\.]+)\)?)$', response_part)
+    exponent = r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)'
+    power_match = re.fullmatch(
+        rf'(\w+)\^(?:({exponent})|\(({exponent})\))', response_part
+    )
     if power_match:
         var_name = power_match.group(1)
         power_str = power_match.group(3) if power_match.group(3) else power_match.group(2)
         power = float(power_str)
         return var_name, 'power', power
+    if '^' in response_part:
+        raise ValueError(
+            f"Invalid response power expression '{response_part}'. "
+            "Use a numeric exponent with balanced parentheses, e.g. Y^-1 or Y^(-1)."
+        )
     
     # Check for function transformations (e.g., "log(Y)", "sqrt(Y)", "inv(Y)")
     func_match = re.match(r'^(\w+)\((\w+)\)$', response_part)
@@ -271,12 +287,12 @@ def _expand_dot_notation(term, data, response_var):
         return [term]
 
 
-def _build_design_matrix(terms, include_intercept, data, response_var, drop_first):
+def _build_design_matrix(terms, include_intercept, data, response_var, drop_first, categorical_levels=None):
     """Build the design matrix from parsed terms."""
     X_dict = {}
     
     for term in terms:
-        term_matrix = _evaluate_term(term, data, response_var, drop_first)
+        term_matrix = _evaluate_term(term, data, response_var, drop_first, categorical_levels)
         X_dict.update(term_matrix)
     
     X = pd.DataFrame(X_dict, index=data.index)
@@ -287,13 +303,13 @@ def _build_design_matrix(terms, include_intercept, data, response_var, drop_firs
     return X
 
 
-def _evaluate_term(term, data, response_var, drop_first):
+def _evaluate_term(term, data, response_var, drop_first, categorical_levels=None):
     """Evaluate a single term and return dictionary of columns."""
     term = term.strip()
     
     # Handle interactions first, then power transformations within each part
     if ':' in term:
-        return _handle_interaction(term, data, response_var, drop_first)
+        return _handle_interaction(term, data, response_var, drop_first, categorical_levels)
     
     # Handle power transformations for single variables
     # Updated regex to handle both X^2 and X^(2) formats
@@ -310,7 +326,7 @@ def _evaluate_term(term, data, response_var, drop_first):
             power_display = str(power)
         
         _resolve_external_variable(var_name, data)
-        base_matrix = _handle_variable(var_name, data, drop_first)
+        base_matrix = _handle_variable(var_name, data, drop_first, categorical_levels)
         
         result = {}
         for col_name, col_values in base_matrix.items():
@@ -350,13 +366,13 @@ def _evaluate_term(term, data, response_var, drop_first):
     func_match = re.match(r'^(\w+)\((.+)\)$', term)
     if func_match:
         func_name, inner_term = func_match.groups()
-        return _apply_function(func_name, inner_term, data, response_var, drop_first)
+        return _apply_function(func_name, inner_term, data, response_var, drop_first, categorical_levels)
     
     # Handle simple variable
-    return _handle_variable(term, data, drop_first)
+    return _handle_variable(term, data, drop_first, categorical_levels)
 
 
-def _handle_interaction(term, data, response_var, drop_first):
+def _handle_interaction(term, data, response_var, drop_first, categorical_levels=None):
     """Handle interaction terms like A:B or A:B:C, including power transformations."""
     parts = term.split(':')
     
@@ -377,7 +393,7 @@ def _handle_interaction(term, data, response_var, drop_first):
                 power_display = str(power)
             
             _resolve_external_variable(var_name, data)
-            base_matrix = _handle_variable(var_name, data, drop_first)
+            base_matrix = _handle_variable(var_name, data, drop_first, categorical_levels)
             
             # Apply power transformation with validation
             transformed_matrix = {}
@@ -415,7 +431,7 @@ def _handle_interaction(term, data, response_var, drop_first):
             part_matrices.append(transformed_matrix)
         else:
             _resolve_external_variable(part, data)
-            part_matrix = _evaluate_term(part, data, response_var, drop_first)
+            part_matrix = _evaluate_term(part, data, response_var, drop_first, categorical_levels)
             part_matrices.append(part_matrix)
     
     # Compute interaction
@@ -438,13 +454,13 @@ def _handle_interaction(term, data, response_var, drop_first):
     return result
 
 
-def _apply_function(func_name, inner_term, data, response_var, drop_first):
+def _apply_function(func_name, inner_term, data, response_var, drop_first, categorical_levels=None):
     """Apply transformation function to term."""
     # Normalize 'inv' to 'inverse'
     if func_name == 'inv':
         func_name = 'inverse'
     
-    inner_matrix = _evaluate_term(inner_term, data, response_var, drop_first)
+    inner_matrix = _evaluate_term(inner_term, data, response_var, drop_first, categorical_levels)
     result = {}
     
     for col_name, col_values in inner_matrix.items():
@@ -508,14 +524,29 @@ def _apply_function(func_name, inner_term, data, response_var, drop_first):
     return result
 
 
-def _handle_variable(var_name, data, drop_first):
+def _handle_variable(var_name, data, drop_first, categorical_levels=None):
     """Handle a single variable, creating dummies if categorical."""
     _resolve_external_variable(var_name, data)
     
     col = data[var_name]
     
-    if isinstance(col.dtype, CategoricalDtype) or col.dtype == object:
-        # Create dummy variables and ensure they're float type
+    if not pd.api.types.is_numeric_dtype(col):
+        # Categorical/string variable (covers legacy object dtype, pandas
+        # CategoricalDtype, and pandas >= 3.0's default StringDtype):
+        if categorical_levels is not None and var_name in categorical_levels:
+            # predict()-mode: force this variable's categories (and their
+            # order) to match what was recorded at fit time, so get_dummies
+            # below produces every trained-on column -- as an all-zero column
+            # where needed -- even if this slice of data (e.g. one new row)
+            # doesn't contain every category.
+            col = pd.Categorical(col, categories=categorical_levels[var_name])
+        elif categorical_levels is not None:
+            # fit()-mode: record the categories in the exact order pandas
+            # will use for dummy encoding (pd.Categorical(col).categories),
+            # so predict() can reconstruct identical columns later from a
+            # partial slice of new data.
+            categorical_levels[var_name] = list(pd.Categorical(col).categories)
+        # create dummy variables and ensure they're float type
         dummies = pd.get_dummies(col, prefix=var_name, drop_first=drop_first)
         # Convert to float to avoid boolean masking issues
         return {col_name: dummies[col_name].astype(float) for col_name in dummies.columns}
@@ -567,8 +598,8 @@ def _apply_response_transformation(response_var, resp_func, resp_power, data):
                     f"  - Add a small constant: ({response_var} + c)^{resp_power}\n"
                     f"  - Use a different transformation"
                 )
-        elif 0 < resp_power < 1:
-            # Fractional powers (roots) require non-negative values
+        if not resp_power.is_integer():
+            # Non-integer real powers require non-negative bases, regardless of sign.
             if (Y < 0).any():
                 invalid_indices = Y[Y < 0].index.tolist()
                 n_invalid = len(invalid_indices)

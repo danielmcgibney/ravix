@@ -882,7 +882,6 @@ def _format_coefficient_table(model, alpha, format='text'):
         latex_parts = []
         latex_parts.append("\\section*{Coefficients}")
         latex_parts.append(coef_df_formatted.to_latex())
-        latex_parts.append("\n\\textit{Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1}")
         content = '\n'.join(latex_parts)
         return _handle_output(content, format)
     
@@ -895,8 +894,6 @@ def _format_coefficient_table(model, alpha, format='text'):
     output.append("Coefficients:")
     output.append("=" * w)
     output.append(coef_str)
-    output.append("---")
-    output.append("Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1")
     output.append("=" * w)
     content = '\n'.join(output)
     return _handle_output(content, format)

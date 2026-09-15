@@ -94,7 +94,7 @@ def boxplot(
         
         # Check if we have a single categorical predictor (special case)
         if (X_out.shape[1] >= 1 and original_x_var in data.columns and 
-            (pd.api.types.is_categorical_dtype(data[original_x_var]) or 
+            (isinstance(data[original_x_var].dtype, pd.CategoricalDtype) or 
              data[original_x_var].dtype == object)):
             
             # Special case: Y is numeric, X is categorical

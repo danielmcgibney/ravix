@@ -106,6 +106,17 @@ def barplot(
     - When agg=None with single row/column numeric data, each value gets a bar
     - Color list cycles if fewer colors provided than bars needed
     """
+    # A categorical Series requests frequencies, not numeric aggregation.
+    if isinstance(formula, pd.Series):
+        if (isinstance(formula.dtype, pd.CategoricalDtype)
+                or pd.api.types.is_string_dtype(formula.dtype)):
+            counts = formula.value_counts(sort=False).rename_axis("Category").reset_index(name="Count")
+            return barplot("Count ~ Category", data=counts, color=color,
+                           title=title, agg=None, horizontal=horizontal,
+                           figsize=figsize, **kwargs)
+        data = formula.to_frame()
+        formula = None
+
     # Handle case where first argument is a DataFrame
     if isinstance(formula, pd.DataFrame):
         data = formula
@@ -156,7 +167,7 @@ def barplot(
                 # Check if we have a single variable that's categorical
                 if len(x_vars) == 1 and x_vars[0] in data.columns:
                     x_var = x_vars[0]
-                    if data[x_var].dtype == 'object' or pd.api.types.is_categorical_dtype(data[x_var]):
+                    if pd.api.types.is_string_dtype(data[x_var].dtype) or isinstance(data[x_var].dtype, pd.CategoricalDtype):
                         # Case: Y ~ categorical variable
                         plot_df = pd.DataFrame({
                             y_var: data[y_var],
@@ -179,9 +190,9 @@ def barplot(
                         else:
                             # Aggregate by category
                             if agg == "count":
-                                plot_data = plot_df.groupby(x_var)[y_var].count().reset_index()
+                                plot_data = plot_df.groupby(x_var, observed=False)[y_var].count().reset_index()
                             else:
-                                plot_data = plot_df.groupby(x_var)[y_var].agg(agg).reset_index()
+                                plot_data = plot_df.groupby(x_var, observed=False)[y_var].agg(agg).reset_index()
                             y_label = f"{agg.capitalize()} of {y_var}"
                         
                         # Determine palette based on color argument
@@ -204,6 +215,7 @@ def barplot(
                         if horizontal:
                             if color is not None:
                                 sns.barplot(y=x_var, x=y_var, data=plot_data, 
+                                           hue=x_var, legend=False, dodge=False,
                                            palette=palette, errorbar=None, **kwargs)
                             else:
                                 sns.barplot(y=x_var, x=y_var, data=plot_data, 
@@ -213,6 +225,7 @@ def barplot(
                         else:
                             if color is not None:
                                 sns.barplot(x=x_var, y=y_var, data=plot_data, 
+                                           hue=x_var, legend=False, dodge=False,
                                            palette=palette, errorbar=None, **kwargs)
                             else:
                                 sns.barplot(x=x_var, y=y_var, data=plot_data, 

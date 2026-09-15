@@ -31,6 +31,13 @@ def predict(model, newX=None):
     model_columns = model.model.exog_names
 
     # Step 4: Reconstruct the formula from model columns
+    if not hasattr(model, 'formula'):
+        reason = getattr(
+            model, '_predict_unsupported_reason',
+            "it wasn't fit with a formula (e.g. it was built directly from "
+            "matrices), so there's no formula to re-parse new data against."
+        )
+        raise ValueError(f"predict() isn't supported for this model: {reason}")
     formula = model.formula
     
     # Extract the response variable name from the formula
@@ -41,9 +48,21 @@ def predict(model, newX=None):
     if response_name not in newX_with_dummy.columns:
         newX_with_dummy.insert(0, response_name, 0)  # Dummy response, won't be used
     
+    # Reuse the categorical levels captured at fit time (if any), so dummy
+    # columns for categories absent from this slice of newX (e.g. a single
+    # new observation) are still produced -- as all-zero columns -- instead
+    # of silently missing. A copy is passed so this call never mutates the
+    # fitted model's stored levels. Older/plain model objects without
+    # _categorical_levels fall back to today's behavior (encode from
+    # whatever categories are present in newX).
+    categorical_levels = dict(getattr(model, '_categorical_levels', None) or {})
+
     # Parse the formula to get the design matrix
     try:
-        _, transformed_X = parse_formula(formula, newX_with_dummy, drop_first=False)
+        _, transformed_X = parse_formula(
+            formula, newX_with_dummy, drop_first=False,
+            categorical_levels=categorical_levels,
+        )
     except KeyError as e:
         # If a variable is missing, provide a helpful error message
         raise ValueError(f"Missing required variable in newX: {str(e)}")

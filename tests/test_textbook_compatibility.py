@@ -5,7 +5,7 @@ This suite is based on the Ravix syntax and workflows used in
 
 Run from the Ravix project root with:
 
-    python -m pytest -q test_ebook_compatibility.py
+    python -m pytest -q tests/test_textbook_compatibility.py
 
 or place this file in ``tests/`` and run:
 
@@ -15,7 +15,7 @@ The tests intentionally focus on the public Ravix interface used in the ebook:
 data access, formula syntax, OLS modeling, summaries, prediction/intervals,
 exploratory plots, diagnostics, transformations, and variable selection.
 
-All ebook syntax covered by this suite is expected to work with Ravix 1.0.1.
+All ebook syntax covered by this suite is expected to work with Ravix 1.0.2.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
-from matplotlib.lines import Line2D
 from statsmodels.stats.outliers_influence import OLSInfluence
 
 import ravix
@@ -198,6 +197,9 @@ def test_default_summary_matches_ravix_ols_output(simple_df, capsys):
     assert "F-statistic" in out
 
 
+@pytest.mark.filterwarnings(
+    "ignore:omni_normtest is not valid with less than 8 observations.*"
+)
 def test_statsmodels_summary_ebook_call(simple_df, capsys):
     """Regression guard for reg.summary(out='statsmodels')."""
     reg = ols("y ~ x", data=simple_df)
@@ -389,16 +391,25 @@ def test_hist_regression_residuals(linear_df):
     assert isinstance(result, tuple)
 
 
+@pytest.mark.filterwarnings(
+    "ignore:vert: bool will be deprecated in a future version.*:PendingDeprecationWarning"
+)
 def test_boxplot_vector(linear_df, monkeypatch):
     monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
     assert boxplot(linear_df.Y) is None
 
 
+@pytest.mark.filterwarnings(
+    "ignore:vert: bool will be deprecated in a future version.*:PendingDeprecationWarning"
+)
 def test_boxplot_dataframe(linear_df, monkeypatch):
     monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
     assert boxplot(linear_df[["Y", "X1", "X2"]]) is None
 
 
+@pytest.mark.filterwarnings(
+    "ignore:vert: bool will be deprecated in a future version.*:PendingDeprecationWarning"
+)
 def test_boxplot_formula(linear_df, monkeypatch):
     monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
     assert boxplot("Y ~ X1 + X2", data=linear_df) is None
@@ -420,9 +431,8 @@ def test_plot_cor_dataframe(linear_df):
 
 
 # ---------------------------------------------------------------------------
-# abline(), including the 1.0.1 axis-scale regression guard
+# abline(), including the 1.0.1 axis-scale guard and 1.0.2 clean return value
 # ---------------------------------------------------------------------------
-
 
 
 def test_plot_then_abline_primary_layering_api(linear_df):
@@ -440,13 +450,13 @@ def test_plot_then_abline_primary_layering_api(linear_df):
     scatter_count = len(ax.collections)
     lines_before = len(ax.lines)
 
-    line = abline(reg)
+    result = abline(reg)
 
-    assert isinstance(line, Line2D)
+    assert result is None
     assert plt.gcf().number == fig_num
-    assert line.axes is ax
     assert len(ax.collections) == scatter_count
     assert len(ax.lines) == lines_before + 1
+    assert ax.lines[-1].axes is ax
     assert ax.get_xlim() == xlim_before
     assert ax.get_ylim() == ylim_before
 
@@ -455,11 +465,13 @@ def test_plot_show_false_abline_explicit_axes(linear_df):
     """Manual figure management should remain compatible with abline as well."""
     reg = ols("Y ~ X1", data=linear_df)
     fig, ax = plot("Y ~ X1", data=linear_df, show=False)
+    lines_before = len(ax.lines)
 
-    line = abline(reg, ax=ax)
+    result = abline(reg, ax=ax)
 
-    assert isinstance(line, Line2D)
-    assert line.axes is ax
+    assert result is None
+    assert len(ax.lines) == lines_before + 1
+    assert ax.lines[-1].axes is ax
 
 
 def test_abline_explicit_intercept_and_slope_does_not_rescale(linear_df):
@@ -467,10 +479,13 @@ def test_abline_explicit_intercept_and_slope_does_not_rescale(linear_df):
     ax.scatter(linear_df.X1, linear_df.Y)
     xlim_before = ax.get_xlim()
     ylim_before = ax.get_ylim()
+    lines_before = len(ax.lines)
 
-    line = abline(a=10.0, b=4.0, ax=ax)
+    result = abline(a=10.0, b=4.0, ax=ax)
 
-    assert isinstance(line, Line2D)
+    assert result is None
+    assert len(ax.lines) == lines_before + 1
+    assert ax.lines[-1].axes is ax
     assert ax.get_xlim() == xlim_before
     assert ax.get_ylim() == ylim_before
 
@@ -481,10 +496,13 @@ def test_abline_fitted_linear_model_does_not_rescale(linear_df):
     ax.scatter(linear_df.X1, linear_df.Y)
     xlim_before = ax.get_xlim()
     ylim_before = ax.get_ylim()
+    lines_before = len(ax.lines)
 
-    line = abline(reg, ax=ax)
+    result = abline(reg, ax=ax)
 
-    assert isinstance(line, Line2D)
+    assert result is None
+    assert len(ax.lines) == lines_before + 1
+    assert ax.lines[-1].axes is ax
     assert ax.get_xlim() == xlim_before
     assert ax.get_ylim() == ylim_before
 
@@ -495,10 +513,13 @@ def test_abline_quadratic_model_ebook_call(quadratic_df):
     ax.scatter(quadratic_df.X, quadratic_df.Y)
     xlim_before = ax.get_xlim()
     ylim_before = ax.get_ylim()
+    lines_before = len(ax.lines)
 
-    line = abline(quad, ax=ax)
+    result = abline(quad, ax=ax)
 
-    assert isinstance(line, Line2D)
+    assert result is None
+    assert len(ax.lines) == lines_before + 1
+    assert ax.lines[-1].axes is ax
     assert ax.get_xlim() == xlim_before
     assert ax.get_ylim() == ylim_before
 

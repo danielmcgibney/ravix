@@ -27,7 +27,7 @@ def _ensure_no_intercept(formula: str) -> str:
     if "~" not in f:
         return f
 
-    f_nospace = f.replace(" ", "")
+    f_nospace = f.split("~", 1)[1].replace(" ", "")
     if "+0" in f_nospace or "-1" in f_nospace:
         return f
 
