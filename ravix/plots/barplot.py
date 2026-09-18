@@ -23,7 +23,8 @@ def barplot(
     
     This function produces different types of bar plots depending on the input:
     1. DataFrame only: Bar plots for all numeric columns with aggregation
-    2. DataFrame without aggregation: Plots all values as separate bars
+    2. DataFrame without aggregation: Plots all values as separate bars, when
+       that's unambiguous (a single column, or a single row)
     3. Formula with numeric variables: Side-by-side bars of Y and X variables
     4. Formula Y ~ categorical: Numeric Y aggregated by categories
     5. Formula Y ~ categorical without aggregation: Pre-aggregated data by categories
@@ -55,8 +56,13 @@ def barplot(
     agg : str or None, default="mean"
         Aggregation method: "mean", "median", "sum", "count", or None.
         If None, plots all values without aggregation. For single row/column
-        numeric data, each value becomes a separate bar. For categorical 
-        predictors, expects pre-aggregated data (one row per category).
+        numeric data, each value becomes a separate bar. For categorical
+        predictors, expects pre-aggregated data (one row per category). For
+        multi-row, multi-column numeric data, agg=None raises a ValueError
+        instead of plotting, since there would be more than one value per
+        bar and no way to combine them without silently aggregating anyway
+        -- specify an aggregation method, or use boxplot() to compare the
+        distributions directly.
     horizontal : bool, default=False
         If True, creates horizontal bar plot.
     figsize : tuple, default=(10, 6)
@@ -104,6 +110,9 @@ def barplot(
     - For numeric predictors with aggregation, each variable gets its own bar
     - When agg=None with categorical data, each category must appear only once
     - When agg=None with single row/column numeric data, each value gets a bar
+    - When agg=None with multi-row, multi-column numeric data, raises a
+      ValueError rather than silently averaging each column (which is what
+      the underlying plotting library would otherwise do)
     - Color list cycles if fewer colors provided than bars needed
     """
     # A categorical Series requests frequencies, not numeric aggregation.
@@ -254,9 +263,20 @@ def barplot(
         
         # Apply aggregation
         if agg is None:
-            # No aggregation - data should already be in final form
-            # Melt without aggregation - each row becomes a bar
+            # No aggregation - each row should become its own bar. That's only
+            # unambiguous if every variable has exactly one value; otherwise
+            # seaborn's barplot silently falls back to its own default
+            # aggregation (the mean), which would contradict agg=None.
             plot_data_melted = plot_data.melt(var_name='Variable', value_name='Value')
+            counts_per_variable = plot_data_melted.groupby('Variable', observed=False).size()
+            if counts_per_variable.max() > 1:
+                raise ValueError(
+                    "With agg=None, each variable must have only one value to plot "
+                    "(one row of data). Found variables with multiple values, which "
+                    "would otherwise be silently averaged by the underlying plotting "
+                    "library. Specify an aggregation method (e.g. agg='mean'), or use "
+                    "boxplot() to compare the distributions of these variables directly."
+                )
         else:
             # Aggregate each variable
             if agg == "count":
@@ -303,18 +323,39 @@ def barplot(
         plot_data = data.select_dtypes(include=[np.number])
         
         # Apply aggregation
+        no_agg_single_column_label = None
+        no_agg_single_column_xlabel = None
         if agg is None:
             # No aggregation - melt the data
             # Special case: single numeric column with multiple rows
             # Transpose so each row becomes a column (which melt will handle correctly)
             if len(plot_data.columns) == 1 and len(plot_data) > 1:
-                # Transpose: rows become columns, index values become column names
+                # Transpose: rows become columns, index values become column names.
+                # Each bar is one raw value of this column, so use the column's own
+                # name and the data's index name (rather than the generic "Value"/
+                # "Variable" defaults, which would hide which column this even is).
+                no_agg_single_column_label = plot_data.columns[0]
+                no_agg_single_column_xlabel = data.index.name or "Observation"
                 original_index = plot_data.index.astype(str)
                 plot_data = plot_data.T
                 plot_data.columns = original_index
-            
+
             # Standard melt: each column becomes a bar
             plot_data_melted = plot_data.melt(var_name='Variable', value_name='Value')
+
+            if no_agg_single_column_label is None:
+                # Multiple columns (or a single row): still ambiguous unless every
+                # variable has exactly one value, for the same reason as the
+                # formula branch above.
+                counts_per_variable = plot_data_melted.groupby('Variable', observed=False).size()
+                if counts_per_variable.max() > 1:
+                    raise ValueError(
+                        "With agg=None, each variable must have only one value to plot "
+                        "(one row of data). Found variables with multiple values, which "
+                        "would otherwise be silently averaged by the underlying plotting "
+                        "library. Specify an aggregation method (e.g. agg='mean'), or use "
+                        "boxplot() to compare the distributions of these variables directly."
+                    )
         else:
             # Aggregate each variable
             if agg == "count":
@@ -336,6 +377,11 @@ def barplot(
                 # Single color for all variables
                 palette = {var: color for var in vars_in_order}
         
+        value_label = no_agg_single_column_label or (
+            ylab if (agg is None or ylab != "Value") else f"{agg.capitalize()} {ylab}"
+        )
+        variable_label = no_agg_single_column_xlabel or xlab
+
         # Create the bar plot
         if horizontal:
             if color is not None:
@@ -344,8 +390,8 @@ def barplot(
             else:
                 sns.barplot(y='Variable', x='Value', data=plot_data_melted, hue='Variable', 
                            dodge=False, errorbar=None, legend=False, **kwargs)
-            plt.xlabel(ylab if (agg is None or ylab != "Value") else f"{agg.capitalize()} {ylab}", fontsize=label_fontsize)
-            plt.ylabel(xlab, fontsize=label_fontsize)
+            plt.xlabel(value_label, fontsize=label_fontsize)
+            plt.ylabel(variable_label, fontsize=label_fontsize)
         else:
             if color is not None:
                 sns.barplot(x='Variable', y='Value', data=plot_data_melted, hue='Variable', 
@@ -353,8 +399,8 @@ def barplot(
             else:
                 sns.barplot(x='Variable', y='Value', data=plot_data_melted, hue='Variable', 
                            dodge=False, errorbar=None, legend=False, **kwargs)
-            plt.ylabel(ylab if (agg is None or ylab != "Value") else f"{agg.capitalize()} {ylab}", fontsize=label_fontsize)
-            plt.xlabel(xlab, fontsize=label_fontsize)
+            plt.ylabel(value_label, fontsize=label_fontsize)
+            plt.xlabel(variable_label, fontsize=label_fontsize)
     
     plt.title(title, fontsize=title_fontsize)
     plt.tick_params(labelsize=tick_fontsize)

@@ -8,6 +8,10 @@ from ravix.plots._theme import get_theme, _resolve_figsize
 from typing import Union, Optional, Tuple, Literal
 import matplotlib.patches as mpatches
 
+
+_DUMMY_WARNING_THRESHOLD = 30
+_DUMMY_WARNING_MESSAGE = "Note: Consider dummy=False to avoid long processing times."
+
 def plot_cor(
     formula: Union[str, pd.DataFrame],
     data: Optional[pd.DataFrame] = None,
@@ -17,6 +21,7 @@ def plot_cor(
     ylab: str = "",
     figsize: Optional[Tuple[float, float]] = None,
     show: bool = True,
+    dummy: bool = True,
     **kwargs
 ) -> Optional[Tuple[plt.Figure, plt.Axes]]:
     """
@@ -24,27 +29,29 @@ def plot_cor(
     
     This function generates correlation matrix visualizations with four different
     display types, ranging from detailed annotations to clean visual representations.
-    Automatically handles formulas or DataFrames and computes correlations for
-    numeric variables only.
+    Automatically handles formulas or DataFrames. For direct DataFrame input,
+    categorical variables are dummy-encoded by default and all levels are retained.
+    Formula input always uses all dummy levels (``drop_first=False``).
     
     Parameters
     ----------
     formula : str or pd.DataFrame
         Formula specifying variables (e.g., "Y ~ X1 + X2") or DataFrame.
-        If DataFrame provided, all numeric columns are used.
+        If a DataFrame is provided, numeric columns are used directly and, by
+        default, categorical/string/bool columns are expanded to dummy variables.
     data : pd.DataFrame, optional
         DataFrame containing variables when formula is provided.
     style : {1, 2, 3, 4}, default=1
         Visualization style:
         
-        Style 1: Split triangle display (default)
+        Style 1: Circle magnitude display (default)
             - Diagonal: Black squares
-            - Upper triangle: Color-coded squares (no numbers)
+            - Upper triangle: Circles sized by correlation magnitude
             - Lower triangle: Bold numbers (no color)
         
-        Style 2: Circle magnitude display
-            - Same as Style 1 but upper triangle shows circles sized by correlation magnitude
+        Style 2: Split triangle display
             - Diagonal: Black squares
+            - Upper triangle: Color-coded squares (no numbers)
             - Lower triangle: Bold numbers (no color)
         
         Style 3: Clean color-only display
@@ -65,7 +72,13 @@ def plot_cor(
     figsize : tuple, default=(10, 8)
         Figure size as (width, height) in inches.
     show : bool, default=True
-        Display plot immediately; if False, return (fig, ax) for manual control
+        Display plot immediately; if False, return (fig, ax) for manual control.
+    dummy : bool, default=True
+        For direct DataFrame input, convert categorical/string/bool columns to
+        dummy variables before computing correlations. All levels are retained
+        (``drop_first=False``). Set to False to use numeric columns only. This
+        argument does not alter formula behavior; formulas always retain all
+        dummy levels.
     **kwargs : dict
         Additional keyword arguments passed to sns.heatmap(), plus optional
         font size overrides (extracted before being passed to heatmap):
@@ -100,6 +113,9 @@ def plot_cor(
     
     >>> # Style 4: Full annotations
     >>> plot_cor(mtcars, style=4, figsize=(12, 10))
+
+    >>> # Numeric-only correlations from a mixed-type DataFrame
+    >>> plot_cor(df, dummy=False)
     
     >>> # Custom colormap and no colorbar
     >>> plot_cor(mtcars, style=1, cmap="RdBu_r", cbar=False)
@@ -112,13 +128,15 @@ def plot_cor(
     
     Notes
     -----
-    - Only numeric columns are included in correlation computation
+    - Direct DataFrame input dummy-encodes categorical variables by default
+    - Dummy encoding always retains every category level (``drop_first=False``)
+    - Formula input also always retains every category level
     - Diagonal represents correlation of variable with itself (always 1.0)
     - Color scale: Red (negative), White (zero), Blue (positive)
     - Style 1 and 2 provide asymmetric information (visual + numerical)
     - Style 3 is best for presentations (clean, no clutter)
     - Style 4 is most detailed (all correlations visible)
-    - Categorical variables are automatically excluded
+    - Use ``dummy=False`` with direct DataFrame input to exclude categoricals
     
     Raises
     ------
@@ -147,20 +165,53 @@ def plot_cor(
             f"Must be 1, 2, 3, or 4."
         )
     
-    # Handle DataFrame input
-    if isinstance(formula, pd.DataFrame):
-        data = formula
+    # Handle DataFrame input. ``dummy`` applies only to this direct-DataFrame
+    # route. Formula parsing below always retains all categorical levels.
+    direct_dataframe = isinstance(formula, pd.DataFrame)
+    if direct_dataframe:
+        data = formula.copy()
         formula = None
-    
-    # Parse formula if provided
+
+    status = None
+
+    # Parse formula if provided. Correlation plots intentionally retain every
+    # dummy level: unlike regression fitting, there is no identification reason
+    # to omit a reference category from a correlation matrix.
     if formula is not None:
         formula = formula + "+0"
         Y_out, X_out = parse_formula(formula, data, drop_first=False)
         Y_name = Y_out.name
         # Combine Y and X data for the correlation matrix
         data = pd.concat([pd.Series(Y_out, name=Y_name), X_out], axis=1)
-    
-    # Keep only numeric columns
+
+    elif dummy:
+        categorical_cols = [
+            col for col in data.columns
+            if (
+                pd.api.types.is_object_dtype(data[col].dtype)
+                or isinstance(data[col].dtype, pd.CategoricalDtype)
+                or pd.api.types.is_string_dtype(data[col].dtype)
+                or pd.api.types.is_bool_dtype(data[col].dtype)
+            )
+        ]
+
+        if categorical_cols:
+            # Estimate the number of dummy columns before expansion so a
+            # high-cardinality ID/name column can produce an immediate hint.
+            n_dummy_columns = sum(data[col].nunique(dropna=True) for col in categorical_cols)
+            if n_dummy_columns > _DUMMY_WARNING_THRESHOLD:
+                status = _show_temporary_dummy_note()
+
+            # Correlation plots retain all category levels by design. Never use
+            # drop_first=True here.
+            data = pd.get_dummies(
+                data,
+                columns=categorical_cols,
+                drop_first=False,
+                dtype=float,
+            )
+
+    # Keep numeric columns after optional categorical expansion.
     numeric_data = data.select_dtypes(include=[np.number])
     
     if numeric_data.empty:
@@ -176,30 +227,66 @@ def plot_cor(
     if 'cmap' not in kwargs:
         kwargs['cmap'] = 'RdBu'
     
-    # Style-specific plotting
-    if style == 1:
-        # Style 1: Split triangle - upper (color only), lower (numbers), diagonal (black)
-        return _plot_type1(corr_matrix, title, xlab, ylab, figsize, show,
-                           title_fontsize, label_fontsize, tick_fontsize, annot_fontsize, cbar_fontsize,
-                           **kwargs)
-    
-    elif style == 2:
-        # Style 2: Circles in upper triangle sized by magnitude
-        return _plot_type2(corr_matrix, title, xlab, ylab, figsize, show,
-                           title_fontsize, label_fontsize, tick_fontsize, annot_fontsize, cbar_fontsize,
-                           **kwargs)
-    
-    elif style == 3:
-        # Style 3: Clean color-only display
-        return _plot_type3(corr_matrix, title, xlab, ylab, figsize, show,
-                           title_fontsize, label_fontsize, tick_fontsize, cbar_fontsize,
-                           **kwargs)
-    
-    elif style == 4:
-        # Style 4: Full annotations with 2 decimals
-        return _plot_type4(corr_matrix, title, xlab, ylab, figsize, show,
-                           title_fontsize, label_fontsize, tick_fontsize, annot_fontsize, cbar_fontsize,
-                           **kwargs)
+    # Style-specific plotting. The temporary high-cardinality note is cleared
+    # when plotting finishes, whether the figure is shown or returned.
+    try:
+        if style == 1:
+            # Style 1: Circles in upper triangle sized by correlation magnitude
+            return _plot_type1(corr_matrix, title, xlab, ylab, figsize, show,
+                               title_fontsize, label_fontsize, tick_fontsize, annot_fontsize, cbar_fontsize,
+                               **kwargs)
+
+        elif style == 2:
+            # Style 2: Split triangle - upper (color only), lower (numbers), diagonal (black)
+            return _plot_type2(corr_matrix, title, xlab, ylab, figsize, show,
+                               title_fontsize, label_fontsize, tick_fontsize, annot_fontsize, cbar_fontsize,
+                               **kwargs)
+
+        elif style == 3:
+            # Style 3: Clean color-only display
+            return _plot_type3(corr_matrix, title, xlab, ylab, figsize, show,
+                               title_fontsize, label_fontsize, tick_fontsize, cbar_fontsize,
+                               **kwargs)
+
+        elif style == 4:
+            # Style 4: Full annotations with 2 decimals
+            return _plot_type4(corr_matrix, title, xlab, ylab, figsize, show,
+                               title_fontsize, label_fontsize, tick_fontsize, annot_fontsize, cbar_fontsize,
+                               **kwargs)
+    finally:
+        _clear_temporary_dummy_note(status)
+
+
+def _show_temporary_dummy_note():
+    """Display a removable hint for high-cardinality dummy expansion."""
+    try:
+        from IPython import get_ipython
+        from IPython.display import display
+
+        if get_ipython() is not None:
+            return ("ipython", display(_DUMMY_WARNING_MESSAGE, display_id=True))
+    except Exception:
+        pass
+
+    # Terminal/script fallback. Keep the message on the current line so it can
+    # be erased when processing completes.
+    print(_DUMMY_WARNING_MESSAGE, end="", flush=True)
+    return ("terminal", len(_DUMMY_WARNING_MESSAGE))
+
+
+def _clear_temporary_dummy_note(status):
+    """Remove the high-cardinality hint without clearing unrelated output."""
+    if status is None:
+        return
+
+    mode, payload = status
+    if mode == "ipython":
+        try:
+            payload.update("")
+        except Exception:
+            pass
+    else:
+        print("\r" + (" " * payload) + "\r", end="", flush=True)
 
 
 def _apply_tick_fontsizes(ax, tick_fontsize):
@@ -284,7 +371,11 @@ def _plot_type1(corr_matrix, title, xlab, ylab, figsize, show,
                        fontsize=annot_fontsize, fontweight='bold',
                        color='black')
     
-    # Move x-axis labels to top and rotate 90 degrees
+    # Force one tick per variable. Seaborn may thin ticks automatically for
+    # large matrices, but Ravix should retain every correlation label.
+    tick_positions = np.arange(len(corr_matrix)) + 0.5
+    ax.set_xticks(tick_positions)
+    ax.set_yticks(tick_positions)
     ax.set_xticklabels(corr_matrix.columns, rotation=90, ha='center', fontweight='bold')
     ax.set_yticklabels(corr_matrix.index, rotation=0, fontweight='bold')
     
@@ -367,7 +458,11 @@ def _plot_type2(corr_matrix, title, xlab, ylab, figsize, show,
                        fontsize=annot_fontsize, fontweight='bold',
                        color='black')
     
-    # Move x-axis labels to top and rotate 90 degrees
+    # Force one tick per variable. Seaborn may thin ticks automatically for
+    # large matrices, but Ravix should retain every correlation label.
+    tick_positions = np.arange(len(corr_matrix)) + 0.5
+    ax.set_xticks(tick_positions)
+    ax.set_yticks(tick_positions)
     ax.set_xticklabels(corr_matrix.columns, rotation=90, ha='center', fontweight='bold')
     ax.set_yticklabels(corr_matrix.index, rotation=0, fontweight='bold')
     
@@ -417,7 +512,11 @@ def _plot_type3(corr_matrix, title, xlab, ylab, figsize, show,
     # Set equal aspect ratio for square cells
     ax.set_aspect("equal")
     
-    # Move x-axis labels to top and rotate 90 degrees
+    # Force one tick per variable. Seaborn may thin ticks automatically for
+    # large matrices, but Ravix should retain every correlation label.
+    tick_positions = np.arange(len(corr_matrix)) + 0.5
+    ax.set_xticks(tick_positions)
+    ax.set_yticks(tick_positions)
     ax.set_xticklabels(corr_matrix.columns, rotation=90, ha='center', fontweight='bold')
     ax.set_yticklabels(corr_matrix.index, rotation=0, fontweight='bold')
     
@@ -480,7 +579,11 @@ def _plot_type4(corr_matrix, title, xlab, ylab, figsize, show,
                    fontsize=annot_fontsize,
                    color='black')
     
-    # Move x-axis labels to top and rotate 90 degrees
+    # Force one tick per variable. Seaborn may thin ticks automatically for
+    # large matrices, but Ravix should retain every correlation label.
+    tick_positions = np.arange(len(corr_matrix)) + 0.5
+    ax.set_xticks(tick_positions)
+    ax.set_yticks(tick_positions)
     ax.set_xticklabels(corr_matrix.columns, rotation=90, ha='center', fontweight='bold')
     ax.set_yticklabels(corr_matrix.index, rotation=0, fontweight='bold')
     

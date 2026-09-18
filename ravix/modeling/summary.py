@@ -82,6 +82,13 @@ _PVALUE_COLS = frozenset(['P>|t|', 'P>|z|', 'Pr(>|t|)', 'Pr(>|z|)'])
 _SIG_COL = ' '
 
 
+def _get_robust_cov_type(model):
+    """Return the Ravix robust covariance label, or None for ordinary OLS."""
+    if not getattr(model, '_ravix_robust', False):
+        return None
+    return getattr(model, '_ravix_cov_type', getattr(model, 'cov_type', 'robust'))
+
+
 def _format_coef_df_for_display(summary_df):
     """
     Return a string-formatted copy of a coefficient DataFrame for LaTeX export.
@@ -589,6 +596,7 @@ def _print_ols_summary(model, out, alpha, format='text'):
         # Extract model statistics
         stats = _extract_ols_statistics(model, alpha)
         stats['alpha'] = alpha  # Add alpha for STATA output
+        stats['robust_covariance'] = _get_robust_cov_type(model)
         
         # Get formatted coefficient table (with R-style labels for simple and r outputs)
         use_r_labels = out in ['simple', 'r']
@@ -747,6 +755,8 @@ def _format_simple_ols_summary(summary_df, stats, format='text'):
         result_df.attrs['aic'] = stats['aic']
         result_df.attrs['bic'] = stats['bic']
         result_df.attrs['RSE'] = stats['RSE']
+        if stats.get('robust_covariance'):
+            result_df.attrs['robust_covariance'] = stats['robust_covariance']
         return result_df
     
     # Build LaTeX output
@@ -754,6 +764,8 @@ def _format_simple_ols_summary(summary_df, stats, format='text'):
         display_df = _format_coef_df_for_display(summary_df)
         latex_parts = []
         latex_parts.append("\\section*{Summary of OLS Regression Analysis}")
+        if stats.get('robust_covariance'):
+            latex_parts.append(f"\\textit{{Robust covariance: {stats['robust_covariance']}}}")
         latex_parts.append("\n\\subsection*{Coefficients}")
         latex_parts.append(display_df.to_latex())
         latex_parts.append("\n\\subsection*{Model Statistics}")
@@ -773,6 +785,8 @@ def _format_simple_ols_summary(summary_df, stats, format='text'):
     w = len(coef_str.splitlines()[0])
     output = []
     output.append("Summary of OLS Regression Analysis:")
+    if stats.get('robust_covariance'):
+        output.append(f"Robust covariance: {stats['robust_covariance']}")
     output.append("=" * w)
     output.append("\nCoefficients:")
     output.append("-" * w)
@@ -799,6 +813,8 @@ def _format_r_style_summary(model, summary_df, stats, format='text'):
         result_df.attrs['adj_r_squared'] = stats['adj_r_squared']
         result_df.attrs['f_statistic'] = stats['f_statistic']
         result_df.attrs['RSE'] = stats['RSE']
+        if stats.get('robust_covariance'):
+            result_df.attrs['robust_covariance'] = stats['robust_covariance']
         return result_df
     
     # Calculate residual statistics
@@ -815,6 +831,8 @@ def _format_r_style_summary(model, summary_df, stats, format='text'):
         display_df = _format_coef_df_for_display(summary_df)
         latex_parts = []
         latex_parts.append("\\section*{R-Style Regression Summary}")
+        if stats.get('robust_covariance'):
+            latex_parts.append(f"\\textit{{Robust covariance: {stats['robust_covariance']}}}")
         latex_parts.append("\n\\subsection*{Residuals}")
         latex_parts.append("\\begin{verbatim}")
         latex_parts.append("    Min      1Q    Median     3Q      Max")
@@ -831,6 +849,9 @@ def _format_r_style_summary(model, summary_df, stats, format='text'):
     
     # Build text output
     output = []
+    if stats.get('robust_covariance'):
+        output.append(f"Robust covariance: {stats['robust_covariance']}")
+        output.append("")
     output.append("Residuals:")
     output.append("    Min      1Q    Median     3Q      Max")
     output.append(" ".join(f"{x:8.4f}" for x in resid_stats))
@@ -870,8 +891,11 @@ def _format_coefficient_table(model, alpha, format='text'):
     
     coef_df = pd.DataFrame(coef_data)
     coef_df[_SIG_COL] = coef_df.iloc[:, -1].apply(significance_code)  # Last p-value column
+    robust_cov = _get_robust_cov_type(model)
     
     if format in ['dataframe', 'df']:
+        if robust_cov:
+            coef_df.attrs['robust_covariance'] = robust_cov
         return coef_df
     
     # Format for display using _format_coef_df_for_display
@@ -881,6 +905,8 @@ def _format_coefficient_table(model, alpha, format='text'):
     if format == 'latex':
         latex_parts = []
         latex_parts.append("\\section*{Coefficients}")
+        if robust_cov:
+            latex_parts.append(f"\\textit{{Robust covariance: {robust_cov}}}")
         latex_parts.append(coef_df_formatted.to_latex())
         content = '\n'.join(latex_parts)
         return _handle_output(content, format)
@@ -892,6 +918,8 @@ def _format_coefficient_table(model, alpha, format='text'):
     w = len(coef_str.splitlines()[0])
     output = []
     output.append("Coefficients:")
+    if robust_cov:
+        output.append(f"Robust covariance: {robust_cov}")
     output.append("=" * w)
     output.append(coef_str)
     output.append("=" * w)
@@ -909,9 +937,12 @@ def _format_confint_table(model, alpha, format='text'):
         f'{level*100:.0f}% CI Lower': conf_intervals.iloc[:, 0],
         f'{level*100:.0f}% CI Upper': conf_intervals.iloc[:, 1]
     })
+    robust_cov = _get_robust_cov_type(model)
     
     if format in ['dataframe', 'df']:
         # Return numeric DataFrame for programmatic use
+        if robust_cov:
+            coef_df.attrs['robust_covariance'] = robust_cov
         return coef_df
     
     # Format to 6 significant figures for display (text/latex)
@@ -923,6 +954,8 @@ def _format_confint_table(model, alpha, format='text'):
     if format == 'latex':
         latex_parts = []
         latex_parts.append("\\section*{Confidence Intervals}")
+        if robust_cov:
+            latex_parts.append(f"\\textit{{Robust covariance: {robust_cov}}}")
         latex_parts.append(coef_df_formatted.to_latex())
         content = '\n'.join(latex_parts)
         return _handle_output(content, format)
@@ -930,6 +963,8 @@ def _format_confint_table(model, alpha, format='text'):
     # Build text output
     output = []
     output.append("Confidence Intervals:")
+    if robust_cov:
+        output.append(f"Robust covariance: {robust_cov}")
     output.append("=" * 54)
     output.append(coef_df_formatted.to_string())
     output.append("=" * 54)
@@ -945,6 +980,8 @@ def _format_stata_summary(model, summary_df, stats, format='text'):
         coef_df = summary_df.copy()
         coef_df['CI Lower'] = conf_intervals.iloc[:, 0]
         coef_df['CI Upper'] = conf_intervals.iloc[:, 1]
+        if stats.get('robust_covariance'):
+            coef_df.attrs['robust_covariance'] = stats['robust_covariance']
         return coef_df
     
     # Build ANOVA header
@@ -956,6 +993,8 @@ def _format_stata_summary(model, summary_df, stats, format='text'):
     conf_label = f"{level_pct}% Conf. Interval"
     
     output = []
+    if stats.get('robust_covariance'):
+        output.append(f"Robust covariance: {stats['robust_covariance']}")
     output.append(anova_header)
     output.append("-" * 78)
     output.append(f"             |      Coef.   Std. Err.      t    P>|t|     [{conf_label}]")

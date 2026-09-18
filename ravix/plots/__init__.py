@@ -1,34 +1,34 @@
 """
 Plots
-============
-
-This subpackage provides functions for various types of plots used in regression analysis.
+=====
+High-level plotting functions for exploratory analysis, regression diagnostics,
+model-selection results, and interval visualization.
 
 Public Functions
 ----------------
 abline
-    Utility function for quickly creating models (lines) for plotting.
+    Add a fitted regression line to a compatible Ravix plot.
 barplot
-    Create bar plot(s) of variable(s) with optional aggregation.
+    Create bar plots with optional aggregation.
 boxplot
-    Create box plot(s) for distribution visualization.
+    Create box plots for distribution visualization.
 hist
-    Create histogram(s) with automatic mode detection (single/multiple variables or model residuals).
-qq
-    Create Q-Q plot(s) for normality assessment (single/multiple variables or model residuals).
+    Create histograms for variables or model residuals.
+plot
+    Create scatter plots, scatterplot matrices, or residual plots.
 plot_bsr
     Visualize best subset regression results.
 plot_cor
-    Display correlation matrix heatmap with multiple visualization styles.
+    Display a correlation heatmap. Direct DataFrame input can dummy-encode
+    categorical variables; all indicator levels are retained when encoded.
 plot_cook
-    Create Cook's distance plot for influence diagnostics.
+    Create Cook's distance plots for influence diagnostics.
 plot_intervals
     Visualize confidence or prediction intervals.
-plot
-    Create scatter plot(s) for data relationships and residual diagnostics with automatic mode detection.
+qq
+    Create Q-Q plots for normality assessment.
 viz
-    Unified plotting interface that routes to appropriate plot functions based on 'kind' parameter.
-    Main entry point for quick exploratory plotting.
+    Route to an appropriate Ravix plotting function using a unified interface.
 """
 
 # Utility functions
@@ -38,38 +38,38 @@ from .abline import abline
 from .barplot import barplot
 from .boxplot import boxplot
 from .hist import hist
-from .qq import qq
+from .plot import plot
 from .plot_bsr import plot_bsr
 from .plot_cor import plot_cor
 from .plot_cook import plot_cook
 from .plot_intervals import plot_intervals
-from .plot import plot
+from .qq import qq
 from .viz import viz
 
 # Theme system
-from ._theme import set_theme, get_theme, theme_context, register_theme
+from ._theme import get_theme, register_theme, set_theme, theme_context
 
 __all__ = [
     # Utilities
-    'abline',
-    
+    "abline",
+
     # Individual plot types
-    'barplot',
-    'boxplot', 
-    'hist',
-    'qq',
-    'plot_bsr',
-    'plot_cor',
-    'plot_cook',
-    'plot_intervals',
-    'plot',
-    
+    "barplot",
+    "boxplot",
+    "hist",
+    "plot",
+    "plot_bsr",
+    "plot_cor",
+    "plot_cook",
+    "plot_intervals",
+    "qq",
+
     # Main plotting interface
-    'viz',
-    
+    "viz",
+
     # Theme
-    'set_theme',
-    'get_theme', 
-    'theme_context',
-    'register_theme',
+    "set_theme",
+    "get_theme",
+    "theme_context",
+    "register_theme",
 ]

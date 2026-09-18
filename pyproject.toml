@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ravix"
-version = "1.0.2"
+dynamic = ["version"]
 description = "Applied regression modeling and visualization for business analytics"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -56,3 +56,6 @@ namespaces = false
 
 [tool.setuptools.package-data]
 ravix = ["data/*.csv"]
+
+[tool.setuptools.dynamic]
+version = {attr = "ravix._version.__version__"}

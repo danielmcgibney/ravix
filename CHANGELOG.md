@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.3 - 2026-09-17
+
+### Fixed
+- Fixed `predict()` for models with transformed responses, including formulas such as `Salary^-1 ~ Jobs**2`, `log(Y) ~ log(X)`, and `sqrt(Y) ~ X`. Prediction now parses only the predictor side of the stored formula, so new data no longer need to contain the response variable.
+- Fixed `predict()` with transformed responses and dot formulas so the supplied predictor columns are retained without introducing a dummy response column.
+- Updated `boxplot()` for compatibility with current and future Matplotlib releases by translating Seaborn's deprecated `vert=` argument to `orientation=` when supported. The legacy path remains available for older Matplotlib versions.
+- Fixed categorical formula boxplots under Pandas 3, where text columns use a dedicated string dtype rather than `object`, ensuring calls such as `boxplot("Salary ~ Education", data=df)` continue to produce one box per category.
+
+### Tests and compatibility
+- Added automated coverage for transformed-response prediction, including negative-power, logarithmic, square-root, categorical, and dot-formula cases.
+- Added an exact regression test for single-row categorical prediction using `job_changes.csv`.
+- Added automated prediction tests for numeric and complete-categorical models returned by `bsr()` and `stepwise()`, plus clear rejection of models that select only part of a categorical variable's dummy columns.
+- Added boxplot compatibility tests verifying that `vert=` does not reach supported Matplotlib versions, boxplot medians are preserved across all supported input styles, and axes state is restored after rendering errors.
+- Validated the updated source with 117 passing tests: 64 textbook compatibility cases and 53 regression cases.
+
 ## 1.0.2 - 2026-09-14
 
 ### Fixed
@@ -27,7 +42,7 @@
 - Preserved textbook coefficient-name formatting.
 - Corrected three malformed warning filters in the textbook compatibility suite.
 - Validated the updated source with 99 passing tests: 64 textbook compatibility cases and 35 regression cases.
-- The `predict()`/categorical fix and the `bsr()`/`stepwise()` formula-reconstruction fix were validated by running the full 99-test suite (no regressions) and by targeted manual verification against hand-computed predictions, including single-row prediction on a non-baseline category, on the baseline category itself, on a model with an interaction term, and on a pre-existing custom-ordered `Categorical` column; `bsr()`/`stepwise()` were checked against both a full-categorical selection and an engineered dataset that forces a partial-categorical selection. **No dedicated `pytest` cases were added to `tests/` for these two fixes** -- this coverage is not yet part of the automated suite. Given this changelog entry is dated as a release rather than marked Unreleased, confirm whether that's an acceptable gap for this date or whether these two entries should move to 1.0.3 pending test coverage.
+- The `predict()` categorical fix and the `bsr()`/`stepwise()` formula-reconstruction fix were validated manually for 1.0.2. Dedicated automated coverage was added for 1.0.3.
 
 ## 1.0.1 - 2026-08-21
 

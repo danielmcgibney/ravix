@@ -15,7 +15,7 @@ The tests intentionally focus on the public Ravix interface used in the ebook:
 data access, formula syntax, OLS modeling, summaries, prediction/intervals,
 exploratory plots, diagnostics, transformations, and variable selection.
 
-All ebook syntax covered by this suite is expected to work with Ravix 1.0.2.
+All ebook syntax covered by this suite is expected to work with Ravix.
 """
 
 from __future__ import annotations
@@ -392,7 +392,7 @@ def test_hist_regression_residuals(linear_df):
 
 
 @pytest.mark.filterwarnings(
-    "ignore:vert: bool will be deprecated in a future version.*:PendingDeprecationWarning"
+    "ignore:vert.*bool will be deprecated in a future version.*:PendingDeprecationWarning"
 )
 def test_boxplot_vector(linear_df, monkeypatch):
     monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
@@ -400,7 +400,7 @@ def test_boxplot_vector(linear_df, monkeypatch):
 
 
 @pytest.mark.filterwarnings(
-    "ignore:vert: bool will be deprecated in a future version.*:PendingDeprecationWarning"
+    "ignore:vert.*bool will be deprecated in a future version.*:PendingDeprecationWarning"
 )
 def test_boxplot_dataframe(linear_df, monkeypatch):
     monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)
@@ -408,7 +408,7 @@ def test_boxplot_dataframe(linear_df, monkeypatch):
 
 
 @pytest.mark.filterwarnings(
-    "ignore:vert: bool will be deprecated in a future version.*:PendingDeprecationWarning"
+    "ignore:vert.*bool will be deprecated in a future version.*:PendingDeprecationWarning"
 )
 def test_boxplot_formula(linear_df, monkeypatch):
     monkeypatch.setattr(plt, "show", lambda *args, **kwargs: None)

@@ -2,64 +2,105 @@ from ._version import __version__
 
 """
 Ravix Package
-================
-Applied modeling and visualization for business analytics
+=============
+Applied modeling and visualization for business analytics.
 
 Root exports are intentionally kept small and user-facing:
-- Modeling: OLS, logistic, and Poisson regression with summary, prediction, and interval utilities
+- Modeling: OLS, logistic, and Poisson regression with prediction, intervals,
+  robust inference, nested-model comparison, and model-selection utilities
 - Plots: high-level plotting functions
-- Utils: get_data
+- Diagnostics: regression diagnostic tests
+- Transforms: data-transformation utilities
+- Helpers: bundled-data access
 
-Advanced/internal helpers remain available under submodules:
-- ravix.modeling (e.g., format_summary, significance_code, print_* helpers, EvalEnvironment)
+Advanced/internal helpers remain available under Ravix submodules.
 """
 
 # --- Modeling (public surface) ---
 from .modeling import (
-    bsr, fit, ols, logistic, poisson,
-    intervals, predict,
-    stepwise, summary, xy_split
+    bsr,
+    compare,
+    fit,
+    intervals,
+    logistic,
+    ols,
+    poisson,
+    predict,
+    robust,
+    stepwise,
+    summary,
+    xy_split,
 )
 
 # --- Plots (public surface) ---
 from .plots import (
-    barplot, boxplot, abline, hist, plot_bsr, plot_cor, plot_cook,
-    plot, plot_intervals, qq, viz
+    abline,
+    barplot,
+    boxplot,
+    hist,
+    plot,
+    plot_bsr,
+    plot_cor,
+    plot_cook,
+    plot_intervals,
+    qq,
+    viz,
 )
 
-# --- Diagnostics (numeric tests only) ---
+# --- Diagnostics ---
 from .diagnostics import (
-    ncv,
     bp,
+    ncv,
     shapiro,
     vif,
 )
 
-# --- Transforms (data-modifying utilities) ---
-from .transforms import (
-    box_cox,
-)
+# --- Transforms ---
+from .transforms import box_cox
 
-
-# --- Helpers
+# --- Helpers ---
 from ._internal.helpers import get_data
 
 __all__ = [
     # Version
     "__version__",
 
-    # Modeling (public)
-    "bp", "bsr", "fit", "ols", "logistic", "poisson",
-    "intervals", "ncv", "predict",
-    "shapiro", "stepwise", "summary", "vif", "xy_split",
+    # Modeling
+    "bsr",
+    "compare",
+    "fit",
+    "intervals",
+    "logistic",
+    "ols",
+    "poisson",
+    "predict",
+    "robust",
+    "stepwise",
+    "summary",
+    "xy_split",
 
-    # Transforms (public)
-    "box_cox", 
-    
-    # Plots (public)
-    "barplot", "boxplot", "abline", "hist", "plot_bsr", "plot_cor", "plot_cook",
-    "plot", "plot_intervals", "qq", "viz",
+    # Diagnostics
+    "bp",
+    "ncv",
+    "shapiro",
+    "vif",
+
+    # Transforms
+    "box_cox",
+
+    # Plots
+    "abline",
+    "barplot",
+    "boxplot",
+    "hist",
+    "plot",
+    "plot_bsr",
+    "plot_cor",
+    "plot_cook",
+    "plot_intervals",
+    "qq",
+    "viz",
 
     # Helpers
-    "get_data"
+    "get_data",
 ]

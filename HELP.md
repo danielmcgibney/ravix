@@ -1,9 +1,8 @@
-# Ravix Help — Ebook Reference
+# Ravix Help: Ebook Reference
 
-**Ravix 1.0.1**  
 Companion reference for *Applied Linear Regression for Business Analytics with Python*
 
-This file documents the Ravix functions and fitted-model attributes used in the ebook. It is intentionally narrower than the full Ravix API so that the syntax here maps directly to the book's workflow and examples.
+This file documents the Ravix functions and fitted-model attributes used in the ebook, together with a small number of post-publication additions that extend the same workflow. It remains intentionally narrower than the full Ravix API.
 
 ---
 
@@ -48,6 +47,8 @@ from ravix import (
     summary,
     predict,
     intervals,
+    robust,
+    compare,
     plot,
     hist,
     boxplot,
@@ -390,6 +391,8 @@ barplot(
 )
 ```
 
+`agg="mean"` is the default for data that require aggregation. If `agg=None` is used with ambiguous multi-row, multi-column numeric input, Ravix raises a `ValueError` rather than silently averaging the data. For unaggregated raw distributions, `boxplot()` is usually more appropriate.
+
 ---
 
 ## 9. `plot_cor()`
@@ -404,6 +407,30 @@ from ravix import plot_cor
 plot_cor(df)
 ```
 
+For direct DataFrame input, categorical, string, and boolean columns are converted to dummy variables by default. Every category level is retained (`drop_first=False`).
+
+```python
+plot_cor(df, dummy=True)
+```
+
+To restrict the correlation matrix to numeric columns only:
+
+```python
+plot_cor(df, dummy=False)
+```
+
+Formula input also retains every dummy level and is not changed by the `dummy` argument:
+
+```python
+plot_cor("Y ~ X1 + Region", data=df)
+```
+
+If dummy encoding creates many columns, Ravix may temporarily display:
+
+```text
+Note: Consider dummy=False to avoid long processing times.
+```
+
 ### Common arguments
 
 ```python
@@ -415,11 +442,12 @@ plot_cor(
     xlab="",
     ylab="",
     figsize=None,
-    show=True
+    show=True,
+    dummy=True
 )
 ```
 
-The `style` argument supports preset visual styles.
+The `style` argument supports four preset visual styles. With `show=False`, the function returns `(fig, ax)` for manual figure control.
 
 ---
 
@@ -583,15 +611,22 @@ Useful ebook values for `out`:
 
 ## 12. `predict()`
 
-Generates predictions from a fitted model.
+Generates point predictions and, optionally, confidence or prediction intervals from a fitted model.
 
 ### Syntax
 
 ```python
-predict(model, newX=None)
+predict(
+    model,
+    newX=None,
+    interval=None,
+    level=None,
+    alpha=None,
+    scale="model"
+)
 ```
 
-### Example
+### Point prediction
 
 ```python
 import pandas as pd
@@ -601,13 +636,48 @@ new_data = pd.DataFrame({"X": [2500]})
 predict(reg, new_data)
 ```
 
-The new dataframe should contain the same predictor variable names used to fit the model.
+The new dataframe should contain the predictor variable names used to fit the model. Ravix reuses fit-time categorical levels when reconstructing the prediction design matrix.
+
+### Confidence interval for the mean response
+
+```python
+predict(reg, new_data, interval="confidence")
+```
+
+### Prediction interval for an individual future response
+
+```python
+predict(reg, new_data, interval="prediction")
+```
+
+Specify the confidence level with either `level` or `alpha`:
+
+```python
+predict(reg, new_data, interval="confidence", level=0.95)
+predict(reg, new_data, interval="prediction", alpha=0.05)
+```
+
+### Transformed-response models
+
+By default, predictions are returned on the scale used to fit the model:
+
+```python
+predict(reg, new_data, scale="model")
+```
+
+For models whose response was transformed with `log()`, `sqrt()`, `inverse()`/`inv()`, or a supported power transformation, predictions can be returned on the original response scale:
+
+```python
+predict(reg, new_data, scale="response")
+```
+
+When an interval is requested, its endpoints are also back-transformed. This is a direct inverse transformation and does not apply a bias correction such as log-response smearing.
 
 ---
 
 ## 13. `intervals()`
 
-Calculates confidence or prediction intervals for new predictor values.
+Calculates confidence or prediction intervals for new predictor values. `intervals()` is retained for textbook and backward compatibility and uses the same prediction pipeline as `predict()`.
 
 ### Syntax
 
@@ -647,11 +717,96 @@ or:
 intervals(reg, new_data, interval="prediction", alpha=0.05)
 ```
 
+Equivalent new code may use:
+
+```python
+predict(reg, new_data, interval="confidence")
+predict(reg, new_data, interval="prediction")
+```
+
 ---
 
 # USEFUL FITTED-MODEL ATTRIBUTES
 
-## 14. Model Attributes Used in the Ebook
+## 14. `robust()`
+
+Returns an OLS result with heteroskedasticity-robust standard errors. The fitted coefficients, fitted values, and residuals are unchanged; inference is recomputed using a heteroskedasticity-consistent covariance estimator.
+
+### Syntax
+
+```python
+robust(model, type="HC3", use_t=True)
+```
+
+### Example
+
+```python
+from ravix import robust
+
+reg = ols("Sales ~ Advertising + Price", data=df)
+rob = robust(reg)
+rob.summary()
+```
+
+`HC3` is the default. The supported covariance estimators are:
+
+```text
+"HC0"
+"HC1"
+"HC2"
+"HC3"
+```
+
+The returned object remains a Ravix-compatible OLS result, so standard attributes and methods can be used:
+
+```python
+rob.params
+rob.bse
+rob.tvalues
+rob.pvalues
+rob.conf_int()
+```
+
+`robust()` does not modify the original fitted model.
+
+---
+
+## 15. `compare()`
+
+Compares two nested OLS models using the classical partial F-test. The models may be supplied in either order; Ravix identifies the reduced and full models automatically.
+
+### Syntax
+
+```python
+compare(model1, model2, format="text")
+```
+
+### Example
+
+```python
+from ravix import compare
+
+reduced = ols("Sales ~ Price", data=df)
+full = ols("Sales ~ Price + Advertising + Income", data=df)
+
+compare(reduced, full)
+```
+
+The comparison uses SSE notation and tests whether the additional terms in the full model jointly improve fit. Ravix verifies that the models are nested and use matching response observations.
+
+### Output formats
+
+```python
+compare(reduced, full, format="text")
+table = compare(reduced, full, format="df")
+latex = compare(reduced, full, format="latex")
+```
+
+Text and LaTeX output place Ravix significance stars next to the p-value. DataFrame output keeps the p-value numeric and stores significance codes separately in the `Signif.` column. The LaTeX output uses a booktabs-style table and does not require `jinja2`.
+
+---
+
+## 16. Model Attributes Used in the Ebook
 
 Once a model has been fitted:
 
@@ -715,7 +870,7 @@ These are useful when calculations need to be performed directly rather than rea
 
 # ADDING FITTED LINES
 
-## 15. `abline()`
+## 17. `abline()`
 
 Adds a fitted line or curve to an existing Ravix plot.
 
@@ -786,7 +941,7 @@ plt.show()
 
 # MULTICOLLINEARITY AND DIAGNOSTICS
 
-## 16. `vif()`
+## 18. `vif()`
 
 Calculates variance inflation factors for predictor variables.
 
@@ -816,7 +971,7 @@ vif(
 
 ---
 
-## 17. `ncv()`
+## 19. `ncv()`
 
 Performs Ravix's nonconstant variance test on a fitted model.
 
@@ -842,7 +997,7 @@ ncv(reg, alpha=0.05)
 
 ---
 
-## 18. `qq()`
+## 20. `qq()`
 
 Creates a Q-Q plot for assessing normality.
 
@@ -879,7 +1034,7 @@ For approximately normal residuals, points should lie reasonably close to the re
 
 ---
 
-## 19. `shapiro()`
+## 21. `shapiro()`
 
 Performs the Shapiro-Wilk test for normality.
 
@@ -901,7 +1056,7 @@ The function tests the model residuals when given a fitted regression object.
 
 ---
 
-## 20. `box_cox()`
+## 22. `box_cox()`
 
 Displays the Box-Cox log-likelihood profile to help identify a response-variable transformation.
 
@@ -933,7 +1088,7 @@ The response variable must contain positive values for a Box-Cox transformation.
 
 # VARIABLE SELECTION
 
-## 21. `stepwise()`
+## 23. `stepwise()`
 
 Performs iterative variable selection.
 
@@ -947,9 +1102,10 @@ stepwise(
     direction="backward",
     metric="aic",
     threshold_in=0.05,
-    threshold_out=0.1,
+    threshold_out=0.10,
     max_steps=100,
-    verbose=False
+    verbose=False,
+    group_categorical=False
 )
 ```
 
@@ -1000,9 +1156,33 @@ SW.bic
 SW.params
 ```
 
+### Grouping categorical predictors
+
+By default, `group_categorical=False` preserves Ravix's historical behavior: individual dummy columns created from a multilevel categorical predictor may enter or leave the model separately.
+
+```python
+SW = stepwise(
+    "Y ~ X1 + Region + Department",
+    data=df,
+    group_categorical=False
+)
+```
+
+Set `group_categorical=True` when the categorical predictor should be treated as one selection term. All dummy columns generated for that categorical main effect then enter or leave together.
+
+```python
+SW = stepwise(
+    "Y ~ X1 + Region + Department",
+    data=df,
+    group_categorical=True
+)
+```
+
+This option changes only the model-selection grouping. It does not change the underlying regression coding of the categorical predictor.
+
 ---
 
-## 22. `bsr()`
+## 24. `bsr()`
 
 Performs best subsets regression.
 
@@ -1014,7 +1194,8 @@ bsr(
     data,
     max_var=8,
     metric="aic",
-    method="ols"
+    method="ols",
+    group_categorical=False
 )
 ```
 
@@ -1047,6 +1228,20 @@ Metrics used in the ebook include:
 "rmse"
 ```
 
+### Grouping categorical predictors
+
+As with `stepwise()`, the default `group_categorical=False` allows individual dummy columns from a multilevel categorical predictor to be selected separately.
+
+```python
+BSR = bsr("Y ~ .", data=df, group_categorical=False)
+```
+
+With `group_categorical=True`, the dummy columns generated by a categorical main effect are treated as a single selection term. The entire categorical predictor is either included or excluded, and it counts as one term toward `max_var`.
+
+```python
+BSR = bsr("Y ~ .", data=df, max_var=6, group_categorical=True)
+```
+
 ### Summary of the selected model
 
 ```python
@@ -1055,7 +1250,7 @@ BSR.summary()
 
 ---
 
-## 23. `plot_bsr()`
+## 25. `plot_bsr()`
 
 Plots results from a best subsets regression object.
 
@@ -1106,7 +1301,7 @@ Useful `type` values include:
 
 # STATSMODELS INFLUENCE MEASURES USED IN THE EBOOK
 
-## 24. `OLSInfluence`
+## 26. `OLSInfluence`
 
 The ebook also uses the Statsmodels `OLSInfluence` object for leverage, standardized/studentized residuals, and Cook's distance. These are Statsmodels commands rather than Ravix functions.
 
@@ -1144,7 +1339,7 @@ cooks_d = influence.cooks_distance[0]
 
 # QUICK REFERENCE
 
-## 25. Ebook Ravix Functions at a Glance
+## 27. Ebook Ravix Functions at a Glance
 
 | Function | Primary purpose |
 |---|---|
@@ -1153,29 +1348,31 @@ cooks_d = influence.cooks_distance[0]
 | `hist()` | Histograms and residual histograms |
 | `boxplot()` | Box plots |
 | `barplot()` | Bar plots and aggregated bar plots |
-| `plot_cor()` | Correlation heatmap |
+| `plot_cor()` | Correlation heatmap with optional categorical dummy encoding |
 | `ols()` | Fit ordinary least squares regression |
 | `summary()` | Model summary, confidence intervals, ANOVA |
-| `predict()` | Point predictions |
-| `intervals()` | Confidence and prediction intervals |
+| `predict()` | Point predictions and optional confidence/prediction intervals |
+| `intervals()` | Backward-compatible confidence and prediction intervals |
+| `robust()` | HC0-HC3 heteroskedasticity-robust OLS inference |
+| `compare()` | Partial F-test for nested OLS models |
 | `abline()` | Overlay fitted line/curve on a plot |
 | `vif()` | Variance inflation factors |
 | `ncv()` | Nonconstant variance test |
 | `qq()` | Q-Q plot |
 | `shapiro()` | Shapiro-Wilk normality test |
 | `box_cox()` | Box-Cox transformation guidance |
-| `stepwise()` | Backward, forward, or bidirectional selection |
-| `bsr()` | Best subsets regression |
+| `stepwise()` | Backward, forward, or bidirectional selection; optional categorical grouping |
+| `bsr()` | Best subsets regression; optional categorical grouping |
 | `plot_bsr()` | Best subsets visualization |
 
 ---
 
-## 26. Compact Example
+## 28. Compact Example
 
 ```python
 import pandas as pd
 from ravix import (
-    get_data, plot, hist, ols, predict, intervals,
+    get_data, plot, hist, ols, predict, intervals, robust, compare,
     vif, ncv, qq, shapiro
 )
 
@@ -1207,8 +1404,12 @@ new_data = pd.DataFrame({
 })
 
 predict(reg, new_data)
-intervals(reg, new_data, interval="confidence")
-intervals(reg, new_data, interval="prediction")
+predict(reg, new_data, interval="confidence")
+predict(reg, new_data, interval="prediction")
+
+# Robust inference, when appropriate
+rob = robust(reg)
+rob.summary()
 
 # Diagnose
 plot(reg)
@@ -1222,4 +1423,4 @@ shapiro(reg)
 
 ## Scope of This Help File
 
-This reference intentionally follows the Ravix functionality used in *Applied Linear Regression for Business Analytics with Python*. Ravix contains additional functionality beyond the ebook's OLS-focused workflow; those functions are not documented here so that this file stays aligned with the material readers encounter in the book.
+This reference follows the Ravix functionality used in *Applied Linear Regression for Business Analytics with Python* and also documents selected post-publication additions that extend the same statistics-first workflow, including robust inference, nested-model comparison, enhanced prediction, categorical grouping in model selection, and categorical handling in correlation plots. Ravix may contain additional functionality beyond this reference.

@@ -5,6 +5,43 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from typing import Optional, Union, List, Tuple
+from functools import wraps
+
+
+def _seaborn_boxplot(**kwargs):
+    """Translate Seaborn's legacy bxp call for current Matplotlib versions."""
+    ax = kwargs.pop("ax", None)
+    if ax is None:
+        ax = plt.gca()
+    original = ax.bxp
+
+    sentinel = object()
+    previous = ax.__dict__.get("bxp", sentinel)
+
+    @wraps(original)
+    def compatible_bxp(*args, **options):
+        vert = options.pop("vert", None)
+        if vert is not None:
+            options["orientation"] = "vertical" if vert else "horizontal"
+        try:
+            return original(*args, **options)
+        except TypeError as exc:
+            # Matplotlib < 3.10 does not accept ``orientation``. Fall back to
+            # the legacy ``vert`` argument only when that is the incompatibility.
+            if "orientation" not in options or "orientation" not in str(exc):
+                raise
+            orientation = options.pop("orientation")
+            options["vert"] = orientation == "vertical"
+            return original(*args, **options)
+
+    ax.bxp = compatible_bxp
+    try:
+        return sns.boxplot(ax=ax, **kwargs)
+    finally:
+        if previous is sentinel:
+            del ax.bxp
+        else:
+            ax.bxp = previous
 
 def boxplot(
     formula: Optional[str] = None, 
@@ -94,8 +131,8 @@ def boxplot(
         
         # Check if we have a single categorical predictor (special case)
         if (X_out.shape[1] >= 1 and original_x_var in data.columns and 
-            (isinstance(data[original_x_var].dtype, pd.CategoricalDtype) or 
-             data[original_x_var].dtype == object)):
+            (isinstance(data[original_x_var].dtype, pd.CategoricalDtype) or
+             pd.api.types.is_string_dtype(data[original_x_var].dtype))):
             
             # Special case: Y is numeric, X is categorical
             plot_data = pd.DataFrame({
@@ -116,7 +153,7 @@ def boxplot(
                     palette = {cat: color[i] for i, cat in enumerate(categories)}
 
             plt.figure(figsize=figsize)
-            sns.boxplot(x=original_x_var, y=Y_name, hue=original_x_var, 
+            _seaborn_boxplot(x=original_x_var, y=Y_name, hue=original_x_var, 
                        data=plot_data, palette=palette, legend=False, **kwargs)
             plt.title(title, fontsize=title_fontsize)
             plt.xlabel(xlab if xlab != "Variable" else original_x_var, fontsize=label_fontsize)
@@ -167,7 +204,7 @@ def boxplot(
                 palette = {col: color for col in plot_data.columns}
 
     plt.figure(figsize=figsize)
-    sns.boxplot(x='Variable', y='Value', hue='Variable', data=plot_data_melted, 
+    _seaborn_boxplot(x='Variable', y='Value', hue='Variable', data=plot_data_melted, 
                 palette=palette, legend=False, dodge=False, **kwargs)
     plt.title(title, fontsize=title_fontsize)
     plt.xlabel(xlab, fontsize=label_fontsize)
