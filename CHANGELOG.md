@@ -22,8 +22,8 @@
 - Improved LaTeX table generation to avoid relying on Pandas `DataFrame.to_latex()` and its optional Jinja2 dependency, maintaining compatibility across Pandas versions.
 
 ### Tests and compatibility
-- Added `test_regression_1_0_4.py` (104 tests) covering the 1.0.4 plotting, logistic-response, prediction, summary, and LaTeX fixes, including `pdflatex` compilation for OLS, logistic, and Poisson summaries. Together with the 1.0.2 and 1.0.3 regression files, all 139 regression tests pass under Pandas 2.2.3 and 3.0.5.
-- Pending before release: a full-suite run including the 64 textbook compatibility cases.
+- Added `test_regression_1_0_4.py` (104 tests) covering the 1.0.4 plotting, logistic-response, prediction, summary, and LaTeX fixes, including `pdflatex` compilation for OLS, logistic, and Poisson summaries.
+- Validated the updated source with 297 passing tests: 64 textbook compatibility cases and 233 regression cases, under Pandas 2.2.3, 3.0.5, and 3.1.0, including tests run against the built wheel.
 
 ## 1.0.3 - 2026-09-17
 
