@@ -45,6 +45,26 @@ def _validate_scale(scale):
 _INTERCEPT_NAMES = ("Intercept", "const", "intercept")
 
 
+def _as_float_matrix(X):
+    """Convert a prediction design matrix to float64, as fit does at fit time.
+
+    Without this, a bool column (a True/False predictor, or dummies from
+    pd.get_dummies) mixed with float columns becomes an object array: GLM
+    predictions then fail in the link function's np.exp, and OLS predictions
+    come back as object dtype. Missing values pass through as NaN predictions,
+    as before; only values that cannot be read as numbers raise.
+    """
+    numeric = X.apply(pd.to_numeric, errors="coerce")
+    bad = numeric.isna() & X.notna()
+    if bad.any().any():
+        bad_cols = X.columns[bad.any()].tolist()
+        raise ValueError(
+            f"Predictor variables {bad_cols} in newX contain non-numeric values "
+            f"that cannot be converted to numbers."
+        )
+    return numeric.astype(np.float64)
+
+
 def _prepare_newdata_raw_matrix(model, newX, model_columns):
     """Build a prediction design matrix for a model with no stored formula.
 
@@ -81,7 +101,7 @@ def _prepare_newdata_raw_matrix(model, newX, model_columns):
             f"{sorted(missing_cols)}."
         )
 
-    return newX[list(model_columns)]
+    return _as_float_matrix(newX[list(model_columns)])
 
 
 def _prepare_newdata(model, newX):
@@ -135,7 +155,7 @@ def _prepare_newdata(model, newX):
     if missing_cols:
         raise ValueError(f"The following required columns are missing: {missing_cols}")
 
-    return transformed_X[model_columns]
+    return _as_float_matrix(transformed_X[model_columns])
 
 
 def _get_response_transform(model):

@@ -7,16 +7,91 @@ from .summary import summary as summary_function
 from typing import Union, Optional
 
 
+def _check_logistic_response(Y):
+    """
+    Require a 0/1 response containing both outcomes, with no missing or
+    infinite values, for logistic regression (booleans count as 0/1).
+
+    statsmodels does not reject other codings: a response coded {0, 2},
+    {1, 2} or {-1, 1} fits without error but returns coefficients around
+    1e15 and probabilities of exactly 0 or 1. Proportions are rejected too:
+    logistic() promises a binary response, one 0/1 outcome per row.
+    """
+    if isinstance(Y, pd.DataFrame):
+        name = Y.columns[0] if Y.shape[1] == 1 else "response"
+    else:
+        name = getattr(Y, "name", None) or "response"
+    try:
+        y = np.asarray(Y, dtype=float).ravel()
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"Response variable '{name}' must be coded 0/1 for logistic regression."
+        ) from None
+    if np.isnan(y).any():
+        raise ValueError(
+            f"Response variable '{name}' contains missing values (NaN) "
+            f"that must be handled before fitting."
+        )
+    if np.isinf(y).any():
+        raise ValueError(f"Response variable '{name}' contains infinite values.")
+    values = np.unique(y)
+    if np.isin(values, [0.0, 1.0]).all():
+        if len(values) < 2:
+            # A single outcome still "converges" (intercept near +/-25) but
+            # there is nothing to model
+            raise ValueError(
+                f"Response variable '{name}' must contain both 0 and 1 for logistic "
+                f"regression; found only {values[0]:g}. Both outcomes must appear "
+                f"in the data."
+            )
+        return
+
+    shown = ", ".join(f"{v:g}" for v in values[:6]) + (", ..." if len(values) > 6 else "")
+    if values.min() >= 0 and values.max() <= 1:
+        # Checked before the two-value case: {0.2, 0.8} is proportions, not codes
+        hint = "Proportions are not supported: logistic() needs one 0/1 outcome per row."
+    elif len(values) == 2:
+        hint = (f"Recode it, e.g. (df['{name}'] == {values[1]:g}).astype(int) to model "
+                f"P({name} = {values[1]:g}), or convert it to text to model the level "
+                f"that sorts last.")
+    else:
+        hint = "Recode it to 0/1 first."
+    raise ValueError(
+        f"Response variable '{name}' must be coded 0/1 for logistic regression; "
+        f"found values {{{shown}}}. {hint}"
+    )
+
+
+def _binary_levels_error(name, levels):
+    """Error for a text/categorical logistic response without exactly two levels."""
+    shown = levels[:10] + (["..."] if len(levels) > 10 else [])
+    if len(levels) < 2:
+        return ValueError(
+            f"Response variable '{name}' must have two categories for logistic "
+            f"regression; found only {len(levels)}: {shown}. Both outcomes must "
+            f"appear in the data."
+        )
+    return ValueError(
+        f"Response variable '{name}' must have exactly two categories for logistic "
+        f"regression; found {len(levels)}: {shown}. Combine them into two first, "
+        f"e.g. df['{name}'] == {levels[-1]!r} to model P({name} = {levels[-1]!r}) "
+        f"against all other categories."
+    )
+
+
 def _fit_matrices(Y, X, method: str, **kwargs):
     """
     Fit statistical models from Y and X matrices.
-    
+
     Internal function used by stepwise and bsr when matrices are already parsed.
     """
     if method == "ols":
         fitted = sm.OLS(Y, X, **kwargs).fit()
-    
+
     elif method == "logistic":
+        # Checked here rather than in _fit_model so that every logistic fit,
+        # including the matrices stepwise()/bsr() pass in, is covered
+        _check_logistic_response(Y)
         fitted = sm.GLM(Y, X, family=sm.families.Binomial(), **kwargs).fit()
     
     elif method == "poisson":
@@ -157,6 +232,7 @@ def _fit_model(formula: str, data: Optional[pd.DataFrame], method: str, **kwargs
     X_out = X_out.astype(np.float64)
     
     # Method-specific Y processing
+    response_event = None
     if method == "ols":
         # Convert Y to numeric
         Y_out = pd.to_numeric(Y_out, errors='coerce')
@@ -168,14 +244,29 @@ def _fit_model(formula: str, data: Optional[pd.DataFrame], method: str, **kwargs
             )
     
     elif method == "logistic":
+        # Check before encoding: get_dummies() turns a missing text value
+        # into an all-zero row, i.e. silently into the reference level
+        if Y_out.isna().any():
+            raise ValueError(
+                f"Response variable '{Y_name}' contains missing values (NaN) "
+                f"that must be handled before fitting."
+            )
         # Handle categorical/binary response
         if not pd.api.types.is_numeric_dtype(Y_out):
+            if isinstance(Y_out.dtype, pd.CategoricalDtype):
+                # Count observed levels only: a categorical filtered down to two
+                # levels keeps its unused categories, which get_dummies() would
+                # otherwise turn into extra columns and reject as non-binary
+                Y_out = Y_out.cat.remove_unused_categories()
+            # Same level order get_dummies() uses: sorted, or category order
+            levels = list(pd.Categorical(Y_out).categories)
+            if len(levels) != 2:
+                raise _binary_levels_error(Y_name, levels)
             Y_out = pd.get_dummies(Y_out, drop_first=True)
-            if Y_out.shape[1] != 1:
-                raise ValueError(
-                    "Response variable must be binary (two categories only). "
-                    f"Found {Y_out.shape[1] + 1} categories."
-                )
+            # The kept dummy is the level modeled as 1: the last in sorted
+            # order (or the last category of a categorical). Recorded so
+            # summary() can say which probability the model estimates.
+            response_event = (Y_name, Y_out.columns[0])
             Y_out = Y_out.iloc[:, 0]
         else:
             Y_out = pd.to_numeric(Y_out, errors='coerce')
@@ -207,7 +298,8 @@ def _fit_model(formula: str, data: Optional[pd.DataFrame], method: str, **kwargs
     # Add formula metadata (not added by _fit_matrices)
     fitted.formula = formula
     fitted._categorical_levels = categorical_levels
-    
+    fitted._response_event = response_event
+
     return fitted
 
 
@@ -439,10 +531,15 @@ def logistic(formula: str, data: Optional[pd.DataFrame] = None, **kwargs):
     data : DataFrame, optional
         Dataset containing all variables referenced in the formula.
         The response variable can be:
-        - Numeric binary (0/1)
+        - Numeric binary (0/1); any other numeric coding, including
+          {1, 2} and proportions, raises a ValueError
         - Boolean (True/False)
-        - Categorical with two categories (will be converted to 0/1)
-        
+        - Categorical with two categories (will be converted to 0/1): the
+          level that sorts last (or, for a pandas categorical, the last
+          observed category) is modeled as 1, and summary() names it, e.g.
+          "Modeling: P(Churn = 'Retained')". Unused categories of a pandas
+          categorical are ignored.
+
         If not provided, ravix will attempt to find variables in the
         calling environment and build a DataFrame automatically.
     **kwargs

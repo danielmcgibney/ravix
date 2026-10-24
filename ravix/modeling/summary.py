@@ -89,6 +89,52 @@ def _get_robust_cov_type(model):
     return getattr(model, '_ravix_cov_type', getattr(model, 'cov_type', 'robust'))
 
 
+_LATEX_SPECIALS = {
+    "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
+    "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+    # These compile unescaped, but LaTeX's default (OT1) font encoding draws
+    # them as other glyphs: 'Pr(>|t|)' renders as 'Pr(¿—t—)', '< 2e-16' as '¡ 2e-16'
+    "<": r"\textless{}", ">": r"\textgreater{}", "|": r"\textbar{}",
+}
+
+
+def _latex_escape(text) -> str:
+    """
+    Escape characters that break LaTeX compilation (variable names such as
+    'Ad_Spend', levels such as 'R&D', headers such as '95% CI Lower') or
+    render as the wrong glyph ('Pr(>|t|)', '< 2e-16'). Single pass, so the
+    braces added for a backslash are not re-escaped.
+    """
+    return "".join(_LATEX_SPECIALS.get(ch, ch) for ch in str(text))
+
+
+def _df_to_latex(df) -> str:
+    """
+    Render a display DataFrame as a booktabs tabular, escaping every label
+    and cell.
+
+    Built by hand (as in compare.py) rather than with DataFrame.to_latex():
+    since pandas 2.0 that routes through Styler, which requires jinja2 (not
+    a ravix dependency) and no longer escapes by default. The layout matches
+    what to_latex() produced: one left-aligned column per column plus the
+    index, an unnamed index header, and NaN shown as 'NaN'. Requires
+    \\usepackage{booktabs}, as before.
+    """
+    def cell(value):
+        return "NaN" if (not isinstance(value, str) and pd.isna(value)) else _latex_escape(value)
+
+    lines = [
+        "\\begin{tabular}{" + "l" * (len(df.columns) + 1) + "}",
+        "\\toprule",
+        " & ".join([""] + [_latex_escape(col) for col in df.columns]) + " \\\\",
+        "\\midrule",
+    ]
+    for index, row in df.iterrows():
+        lines.append(" & ".join([_latex_escape(index)] + [cell(v) for v in row]) + " \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}", ""]
+    return "\n".join(lines)
+
+
 def _format_coef_df_for_display(summary_df):
     """
     Return a string-formatted copy of a coefficient DataFrame for LaTeX export.
@@ -111,7 +157,7 @@ def _format_coef_df_for_display(summary_df):
     Returns
     -------
     pd.DataFrame
-        String-formatted copy ready for to_latex().
+        String-formatted copy ready for _df_to_latex().
     """
     display_df = summary_df.copy()
     for col in display_df.columns:
@@ -133,9 +179,9 @@ def _format_coef_df_for_display(summary_df):
 # ---------------------------------------------------------------------------
 
 # Fixed column widths (characters).  Index width is a minimum; it grows to
-# fit the longest variable name in the model.
+# fit the longest variable name that fits within the summary width (see
+# _summary_width).  Longer names are printed in full on their own line.
 _IDX_MIN = 12   # variable name column minimum width
-_IDX_MAX = 16   # variable name column maximum width (truncate longer names)
 _EST_W   = 9    # Estimate (fixed decimal or 4 sig fig sci notation)
 _SE_W    = 10   # Std. Error (magnitude-aware decimals or sci notation)
 _T_W     =  8   # t / z value (3 decimal places)
@@ -143,6 +189,29 @@ _P_W     = 10   # p-value (4 decimals or sci notation) - no stars
 _SIG_W   =  4   # significance column: ' ' + stars (up to 3)
 _COL_GAP = ' '  # single-space gap between columns
 _EST_SE_GAP = '  ' # two-space gap between Estimate and Std. Error
+
+# Width of everything right of the name column, including significance stars
+_NUM_W = (len(_COL_GAP) + _EST_W + len(_EST_SE_GAP) + _SE_W
+          + len(_COL_GAP) + _T_W + len(_COL_GAP) + _P_W + _SIG_W)
+
+_DEFAULT_SUMMARY_WIDTH = 80  # characters, like R's default getOption("width")
+
+
+def _summary_width() -> int:
+    """
+    Target line width for coefficient tables: the active theme's
+    ``summary_width`` if it sets one, else 80. Rows are kept within it; a
+    single name longer than the width is still printed in full on its own
+    line and will exceed it (rename the variable if that matters, e.g. on a
+    printed page). For a book page, e.g.::
+
+        from ravix.plots._theme import register_theme, set_theme, get_theme
+        register_theme("book", {**get_theme(), "summary_width": 65})
+        set_theme("book")
+    """
+    from ravix.plots._theme import get_theme
+    width = get_theme().get("summary_width")
+    return _DEFAULT_SUMMARY_WIDTH if width is None else int(width)
 
 # Reverse-mapping: R-style column label → canonical internal name used by
 # render_coef_table.  _get_coefficient_table renames columns when called
@@ -262,7 +331,7 @@ def format_stderr_console(val: float) -> str:
             return f'{val:.7f}'
 
 
-def render_coef_table(df) -> str:
+def render_coef_table(df, width=None) -> str:
     """
     Render a numeric coefficient DataFrame as a fixed-width plain-text table.
 
@@ -277,6 +346,15 @@ def render_coef_table(df) -> str:
         income          3.1416      0.0988    31.801   4.56e-07 ***
         education      -0.00012   5.679e-05    -2.173     0.0298 *
 
+    Variable names are never truncated. The name column grows to fit the
+    longest name for which the row stays within ``width``; a longer name is
+    printed in full on its own line, with its values on the next line::
+
+                              Estimate  Std. Error  t-value    p-value
+        Advertising_TV_Spend    1.8791    0.057851   32.481    < 2e-16 ***
+        Advertising_TV_Spend:Region_Southwest
+                              0.068078    0.083233    0.818     0.4144
+
     Parameters
     ----------
     df : pd.DataFrame
@@ -284,6 +362,12 @@ def render_coef_table(df) -> str:
         ``'coef'``, ``'std err'``, ``'t'`` or ``'z'``, ``'P>|t|'`` or
         ``'P>|z|'``, and ``' '`` (significance).  All numeric columns must
         hold floats.  R-style column labels are accepted via ``_COEF_COL_ALIASES``.
+    width : int, optional
+        Target line width in characters. Defaults to the active theme's
+        ``summary_width``, else 80. Not a hard maximum: a single name longer
+        than the width is printed in full on its own line and exceeds it,
+        and the numeric columns need 46 characters plus at least 12 for
+        names, so no table is narrower than 58 characters.
 
     Returns
     -------
@@ -303,16 +387,13 @@ def render_coef_table(df) -> str:
     t_header = 't-value' if has_t else 'z-value'
 
     # Index width: at least _IDX_MIN, grows to fit the longest variable name
-    # but capped at _IDX_MAX to prevent table overflow
-    max_name_len = max(len(str(n)) for n in df.index)
-    idx_w = max(_IDX_MIN, min(max_name_len, _IDX_MAX))
-    
-    # Truncate long variable names with ellipsis if they exceed _IDX_MAX
-    def format_var_name(name):
-        name_str = str(name)
-        if len(name_str) > _IDX_MAX:
-            return name_str[:_IDX_MAX-3] + '...'
-        return name_str
+    # whose row fits within the width. Names longer than that go on their own
+    # line (below), so names are never truncated.
+    if width is None:
+        width = _summary_width()
+    name_budget = width - _NUM_W
+    fitting = [len(str(n)) for n in df.index if len(str(n)) <= name_budget]
+    idx_w = max([_IDX_MIN] + fitting)
 
     # Header row — significance column has no header (R convention)
     header = (
@@ -331,8 +412,13 @@ def render_coef_table(df) -> str:
         tv  = f"{df.loc[name, stat_col]:.3f}"
         pv  = format_pvalue_console(df.loc[name, p_col])
         sig = df.loc[name, _SIG_COL].strip()  # '' for non-significant rows
-        
-        formatted_name = format_var_name(name)
+
+        formatted_name = str(name)
+        if len(formatted_name) > idx_w:
+            # Too long for the name column: full name on its own line,
+            # values on the next line under their column headers
+            lines.append(formatted_name)
+            formatted_name = ""
         line = (
             f"{formatted_name:<{idx_w}}"  # LEFT-aligned coefficient names
             f"{_COL_GAP}{est:>{_EST_W}}"
@@ -502,7 +588,7 @@ def _handle_output(content, format='text'):
         return None
     elif format == 'latex':
         if isinstance(content, pd.DataFrame):
-            return content.to_latex()
+            return _df_to_latex(content)
         else:
             # Assume content is already LaTeX-formatted string
             return content
@@ -765,9 +851,9 @@ def _format_simple_ols_summary(summary_df, stats, format='text'):
         latex_parts = []
         latex_parts.append("\\section*{Summary of OLS Regression Analysis}")
         if stats.get('robust_covariance'):
-            latex_parts.append(f"\\textit{{Robust covariance: {stats['robust_covariance']}}}")
+            latex_parts.append(f"\\textit{{Robust covariance: {_latex_escape(stats['robust_covariance'])}}}")
         latex_parts.append("\n\\subsection*{Coefficients}")
-        latex_parts.append(display_df.to_latex())
+        latex_parts.append(_df_to_latex(display_df))
         latex_parts.append("\n\\subsection*{Model Statistics}")
         latex_parts.append("\\begin{itemize}")
         latex_parts.append(f"\\item Residual Standard Error: {stats['RSE_fmt']}")
@@ -775,7 +861,7 @@ def _format_simple_ols_summary(summary_df, stats, format='text'):
         latex_parts.append(f"\\item Adjusted R-squared: {stats['adj_r_squared_fmt']}")
         latex_parts.append(f"\\item AIC: {stats['aic_fmt']}")
         latex_parts.append(f"\\item BIC: {stats['bic_fmt']}")
-        latex_parts.append(f"\\item F-statistic: {stats['f_statistic_fmt']} on {stats['df_model']} and {stats['df_resid']} DF, p-value: {stats['f_p_value_fmt']}")
+        latex_parts.append(f"\\item F-statistic: {stats['f_statistic_fmt']} on {stats['df_model']} and {stats['df_resid']} DF, p-value: {_latex_escape(stats['f_p_value_fmt'])}")
         latex_parts.append("\\end{itemize}")
         content = '\n'.join(latex_parts)
         return _handle_output(content, format)
@@ -832,18 +918,18 @@ def _format_r_style_summary(model, summary_df, stats, format='text'):
         latex_parts = []
         latex_parts.append("\\section*{R-Style Regression Summary}")
         if stats.get('robust_covariance'):
-            latex_parts.append(f"\\textit{{Robust covariance: {stats['robust_covariance']}}}")
+            latex_parts.append(f"\\textit{{Robust covariance: {_latex_escape(stats['robust_covariance'])}}}")
         latex_parts.append("\n\\subsection*{Residuals}")
         latex_parts.append("\\begin{verbatim}")
         latex_parts.append("    Min      1Q    Median     3Q      Max")
         latex_parts.append(" ".join(f"{x:8.4f}" for x in resid_stats))
         latex_parts.append("\\end{verbatim}")
         latex_parts.append("\n\\subsection*{Coefficients}")
-        latex_parts.append(display_df.to_latex())
+        latex_parts.append(_df_to_latex(display_df))
         latex_parts.append("\n\\textit{Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1}")
         latex_parts.append(f"\n\\noindent Residual standard error: {stats['RSE_fmt']} on {stats['df_resid']} degrees of freedom\\\\")
         latex_parts.append(f"R-squared: {stats['r_squared_fmt']}, Adjusted R-squared: {stats['adj_r_squared_fmt']}\\\\")
-        latex_parts.append(f"F-statistic: {stats['f_statistic_fmt']} on {stats['df_model']} and {stats['df_resid']} DF, p-value: {stats['f_p_value_fmt']}")
+        latex_parts.append(f"F-statistic: {stats['f_statistic_fmt']} on {stats['df_model']} and {stats['df_resid']} DF, p-value: {_latex_escape(stats['f_p_value_fmt'])}")
         content = '\n'.join(latex_parts)
         return _handle_output(content, format)
     
@@ -906,8 +992,8 @@ def _format_coefficient_table(model, alpha, format='text'):
         latex_parts = []
         latex_parts.append("\\section*{Coefficients}")
         if robust_cov:
-            latex_parts.append(f"\\textit{{Robust covariance: {robust_cov}}}")
-        latex_parts.append(coef_df_formatted.to_latex())
+            latex_parts.append(f"\\textit{{Robust covariance: {_latex_escape(robust_cov)}}}")
+        latex_parts.append(_df_to_latex(coef_df_formatted))
         content = '\n'.join(latex_parts)
         return _handle_output(content, format)
     
@@ -955,8 +1041,8 @@ def _format_confint_table(model, alpha, format='text'):
         latex_parts = []
         latex_parts.append("\\section*{Confidence Intervals}")
         if robust_cov:
-            latex_parts.append(f"\\textit{{Robust covariance: {robust_cov}}}")
-        latex_parts.append(coef_df_formatted.to_latex())
+            latex_parts.append(f"\\textit{{Robust covariance: {_latex_escape(robust_cov)}}}")
+        latex_parts.append(_df_to_latex(coef_df_formatted))
         content = '\n'.join(latex_parts)
         return _handle_output(content, format)
     
@@ -1161,7 +1247,8 @@ def _print_logistic_summary(model, out, alpha, format='text'):
         content = "R-style output not currently available for logistic regression."
         return _handle_output(content, format)
     elif out == 'simple':
-        return _format_simple_logistic_summary(summary_df, stats, format)
+        return _format_simple_logistic_summary(summary_df, stats, format,
+                                               event=_modeled_event_text(model))
     elif out in ['coefficients', 'coef']:
         return _format_coefficient_table(model, alpha, format)
     elif out in ['confint', 'ci']:
@@ -1176,10 +1263,27 @@ def _print_logistic_summary(model, out, alpha, format='text'):
         raise ValueError(f"Unsupported output format: '{out}'")
 
 
-def _format_simple_logistic_summary(summary_df, stats, format='text'):
+def _modeled_event_text(model):
+    """
+    "P(Churn = 'Retained')" when logistic() converted a text/categorical
+    response to 0/1 (see fit._fit_model), else None. A numeric or boolean
+    response needs no note: the modeled event is 1 / True.
+    """
+    event = getattr(model, '_response_event', None)
+    if event is None:
+        return None
+    name, level = event
+    if isinstance(level, np.generic):
+        level = level.item()  # np.int64(0) -> 0 for display
+    return f"P({name} = {level!r})"
+
+
+def _format_simple_logistic_summary(summary_df, stats, format='text', event=None):
     """Format simple logistic regression summary."""
     if format in ['dataframe', 'df']:
         result_df = summary_df.copy()
+        if event is not None:
+            result_df.attrs['modeled_event'] = event
         result_df.attrs['log_likelihood'] = stats['log_likelihood']
         result_df.attrs['deviance'] = stats['deviance']
         result_df.attrs['pseudo_r_squared'] = stats['pseudo_r_squared']
@@ -1195,8 +1299,10 @@ def _format_simple_logistic_summary(summary_df, stats, format='text'):
         display_df = _format_coef_df_for_display(summary_df)
         latex_parts = []
         latex_parts.append("\\section*{Summary of Logistic Regression Analysis}")
+        if event is not None:
+            latex_parts.append(f"Modeling: {_latex_escape(event)}")
         latex_parts.append("\n\\subsection*{Coefficients (Log-Odds)}")
-        latex_parts.append(display_df.to_latex())
+        latex_parts.append(_df_to_latex(display_df))
         latex_parts.append("\n\\subsection*{Model Statistics}")
         latex_parts.append("\\begin{itemize}")
         latex_parts.append(f"\\item Deviance: {stats['deviance_fmt']}")
@@ -1206,7 +1312,7 @@ def _format_simple_logistic_summary(summary_df, stats, format='text'):
         latex_parts.append(f"\\item BIC: {stats['bic_fmt']}")
         latex_parts.append(
             f"\\item LR chi-square: {stats['lr_statistic_fmt']} on "
-            f"{stats['lr_df']} DF, p-value: {stats['lr_p_value_fmt']}"
+            f"{stats['lr_df']} DF, p-value: {_latex_escape(stats['lr_p_value_fmt'])}"
         )
         latex_parts.append("\\end{itemize}")
         content = '\n'.join(latex_parts)
@@ -1218,6 +1324,8 @@ def _format_simple_logistic_summary(summary_df, stats, format='text'):
     output = []
     output.append("Summary of Logistic Regression Analysis:")
     output.append("=" * w)
+    if event is not None:
+        output.append(f"Modeling: {event}")
     output.append("\nCoefficients (Log-Odds):")
     output.append("-" * w)
     output.append(coef_str)
@@ -1318,7 +1426,7 @@ def _format_simple_poisson_summary(summary_df, stats, format='text'):
         latex_parts = []
         latex_parts.append("\\section*{Summary of Poisson Regression Analysis}")
         latex_parts.append("\n\\subsection*{Coefficients (Log Mean)}")
-        latex_parts.append(display_df.to_latex())
+        latex_parts.append(_df_to_latex(display_df))
         latex_parts.append("\n\\subsection*{Model Statistics}")
         latex_parts.append("\\begin{itemize}")
         latex_parts.append(f"\\item Deviance: {stats['deviance_fmt']}")
@@ -1328,7 +1436,7 @@ def _format_simple_poisson_summary(summary_df, stats, format='text'):
         latex_parts.append(f"\\item BIC: {stats['bic_fmt']}")
         latex_parts.append(
             f"\\item LR chi-square: {stats['lr_statistic_fmt']} on "
-            f"{stats['lr_df']} DF, p-value: {stats['lr_p_value_fmt']}"
+            f"{stats['lr_df']} DF, p-value: {_latex_escape(stats['lr_p_value_fmt'])}"
         )
         latex_parts.append("\\end{itemize}")
         content = '\n'.join(latex_parts)

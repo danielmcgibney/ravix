@@ -302,18 +302,27 @@ def _plot_xy(
 
     fig, ax = plt.subplots(figsize=figsize)
 
+    # Text/categorical/boolean axes: place levels at 0, 1, ... in the order
+    # logistic() uses, rather than matplotlib's order of first appearance
+    x_vals, x_levels = _axis_positions(X_out.iloc[:, 0])
+    y_vals, y_levels = _axis_positions(Y_out)
+
     # Color may be str or array-like
     legend_labels = kwargs.pop("legend_labels", None)
     _scatter_xy(
         ax,
-        X_out.values.flatten(),
-        Y_out,
+        x_vals,
+        y_vals,
         color=color,
         psize=psize,
         alpha=alpha,
         legend_labels=legend_labels,
         **kwargs,
     )
+    if x_levels is not None:
+        ax.set_xticks(range(len(x_levels)), labels=[str(lvl) for lvl in x_levels])
+    if y_levels is not None:
+        ax.set_yticks(range(len(y_levels)), labels=[str(lvl) for lvl in y_levels])
 
     ax.set_xlabel(xlab if xlab is not None else x_colname, fontsize=label_fontsize)
     ax.set_ylabel(ylab if ylab is not None else getattr(Y_out, "name", "Y"), fontsize=label_fontsize)
@@ -333,6 +342,28 @@ def _plot_xy(
         pass
         return None
     return fig, ax
+
+
+def _axis_positions(values: pd.Series) -> Tuple[np.ndarray, Optional[List[Any]]]:
+    """
+    Numeric positions for one scatter axis, plus level labels if the
+    variable is text, categorical or boolean (None otherwise).
+
+    Levels sit at 0, 1, ... in pd.Categorical order: sorted for text and
+    booleans, category order for a pandas categorical. That is the order
+    logistic() uses, so for a binary response the modeled level sits at 1
+    and abline()'s probability curve lines up with it. (Plotting text
+    directly would place levels in order of first appearance.)
+    """
+    dtype = values.dtype
+    if not (pd.api.types.is_string_dtype(dtype)
+            or isinstance(dtype, pd.CategoricalDtype)
+            or pd.api.types.is_bool_dtype(dtype)):
+        return values.to_numpy(), None
+    cat = pd.Categorical(values)
+    positions = cat.codes.astype(float)
+    positions[cat.codes < 0] = np.nan  # missing values: not plotted
+    return positions, list(cat.categories)
 
 
 def _scatter_xy(
@@ -487,9 +518,25 @@ def _plots(
             ax = axes[i, j]
             col_i = cols[i]   # row variable  → y-axis
             col_j = cols[j]   # column variable → x-axis
+            # Text/categorical/boolean variables sit at 0, 1, ... in the same
+            # order as the two-variable plot and logistic() (see _axis_positions)
+            x_vals, x_levels = _axis_positions(data[col_j])
+            y_vals, y_levels = _axis_positions(data[col_i])
+            if i == j:
+                y_levels = None  # diagonal y-axis is counts/density
 
             # ── diagonal ──────────────────────────────────────────────────
-            if i == j:
+            if i == j and diag != "label" and x_levels is not None:
+                # Counts per level, in level order (a histogram of text would
+                # use order of first appearance; a density is undefined)
+                counts = pd.Series(x_vals).value_counts().reindex(
+                    range(len(x_levels)), fill_value=0)
+                ax.bar(counts.index, counts.values, color=diagonal_color,
+                       edgecolor="white", linewidth=0.4)
+                ax.set_xlabel("")
+                ax.set_ylabel("")
+
+            elif i == j:
                 if diag == "label":
                     ax.set_axis_off()
                     ax.text(
@@ -529,8 +576,6 @@ def _plots(
 
             # ── off-diagonal scatter ───────────────────────────────────────
             else:
-                x_vals = data[col_j].values
-                y_vals = data[col_i].values
                 ax.scatter(
                     x_vals, y_vals,
                     c=color, s=18, alpha=0.6,
@@ -538,7 +583,9 @@ def _plots(
                     **_scatter_kw,
                 )
 
-                if lines:
+                # No regression line through level codes (as before, when
+                # text values made the fit fail and the line was skipped)
+                if lines and x_levels is None and y_levels is None:
                     try:
                         mask = ~(np.isnan(x_vals) | np.isnan(y_vals))
                         if mask.sum() > 2:
@@ -559,9 +606,16 @@ def _plots(
                 width=0.6,
                 pad=2,
             )
-            # Reduce tick density to avoid crowding
-            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=4, prune="both"))
-            ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4, prune="both"))
+            # Reduce tick density to avoid crowding; a text axis keeps one
+            # tick per level, labeled with the level
+            if x_levels is not None:
+                ax.set_xticks(range(len(x_levels)), labels=[str(lvl) for lvl in x_levels])
+            else:
+                ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=4, prune="both"))
+            if y_levels is not None:
+                ax.set_yticks(range(len(y_levels)), labels=[str(lvl) for lvl in y_levels])
+            else:
+                ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=4, prune="both"))
 
             # ── no axis labels on any panel ───────────────────────────────
             ax.set_xlabel("")

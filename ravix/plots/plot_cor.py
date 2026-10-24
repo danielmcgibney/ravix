@@ -220,8 +220,13 @@ def plot_cor(
             "Cannot compute correlation matrix."
         )
     
-    # Calculate the correlation matrix
-    corr_matrix = numeric_data.corr()
+    # Calculate the correlation matrix. Clip to [-1, 1]: pandas < 3.0 can
+    # return perfectly (anti)correlated pairs as e.g. -1.0000000000000004 --
+    # routinely for the two dummies of a two-level category, since all
+    # levels are kept -- and style 1 turns |r| into a circle edge alpha,
+    # which matplotlib rejects above 1 ("RGBA values should be within 0-1
+    # range"). NaN (e.g. a constant column) passes through unchanged.
+    corr_matrix = numeric_data.corr().clip(lower=-1.0, upper=1.0)
     
     # Set default colormap if not provided - use stronger diverging palette
     if 'cmap' not in kwargs:
@@ -289,6 +294,31 @@ def _clear_temporary_dummy_note(status):
         print("\r" + (" " * payload) + "\r", end="", flush=True)
 
 
+_CBAR_DEFAULTS = {"shrink": 1.0, "label": "", "format": "%.2f"}
+
+
+def _heatmap_kwargs(kwargs, exclude=()):
+    """
+    Build sns.heatmap() arguments. linewidths, linecolor and cbar_kws are
+    defaults the caller can override (the docstring advertises them; they
+    used to be overwritten); user cbar_kws entries are merged over the
+    colorbar defaults rather than replacing them. The correlation scale
+    (vmin=-1, vmax=1, center=0) and square cells are always applied.
+    """
+    heatmap_kwargs = {"linewidths": 1.0, "linecolor": "black"}
+    heatmap_kwargs.update({k: v for k, v in kwargs.items() if k not in exclude})
+    heatmap_kwargs["cbar_kws"] = {**_CBAR_DEFAULTS, **(kwargs.get("cbar_kws") or {})}
+    heatmap_kwargs.update({"vmin": -1, "vmax": 1, "center": 0, "square": True})
+    return heatmap_kwargs
+
+
+def _format_colorbar(ax, cbar_fontsize):
+    """Set colorbar tick label size; no-op when cbar=False drew no colorbar."""
+    cbar = ax.collections[0].colorbar
+    if cbar is not None:
+        cbar.ax.tick_params(labelsize=cbar_fontsize)
+
+
 def _apply_tick_fontsizes(ax, tick_fontsize):
     """
     Force tick label fontsizes after tight_layout().
@@ -329,26 +359,22 @@ def _plot_type1(corr_matrix, title, xlab, ylab, figsize, show,
     norm = mcolors.Normalize(vmin=-1, vmax=1)
     
     # Setup kwargs for heatmap
-    heatmap_kwargs = {k: v for k, v in kwargs.items() if k not in ['annot', 'fmt', 'annot_kws']}
-    heatmap_kwargs.update({'vmin': -1, 'vmax': 1, 'center': 0, 'square': True,
-                           'linewidths': 1.0, 'linecolor': 'black',
-                           'cbar_kws': {"shrink": 1.0, "label": "", "format": "%.2f"}})
-    
+    heatmap_kwargs = _heatmap_kwargs(kwargs, exclude=['annot', 'fmt', 'annot_kws'])
+
     # Draw the heatmap without annotations (we'll add custom text)
     sns.heatmap(display_matrix, annot=False, cmap=cmap, ax=ax, **heatmap_kwargs)
-    
+
     # Increase colorbar tick label size
-    cbar = ax.collections[0].colorbar
-    cbar.ax.tick_params(labelsize=cbar_fontsize)
-    
+    _format_colorbar(ax, cbar_fontsize)
+
     # Set equal aspect ratio for square cells
     ax.set_aspect("equal")
-    
+
     # Paint the diagonal black
-    _ = [ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=True, facecolor='black', 
-                                    linewidth=1.0, edgecolor='black')) 
+    _ = [ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=True, facecolor='black',
+                                    linewidth=1.0, edgecolor='black'))
          for i in range(n)]
-    
+
     # Add circles to upper triangle ON WHITE background
     # Use power 0.7 transformation for moderate scaling (between linear and sqrt)
     # Border opacity based on correlation magnitude
@@ -422,23 +448,13 @@ def _plot_type2(corr_matrix, title, xlab, ylab, figsize, show,
                 display_matrix.iloc[i, j] = 0  # Set to 0 for white color
     
     # Setup kwargs for heatmap
-    heatmap_kwargs = {k: v for k, v in kwargs.items() if k not in ['annot', 'fmt', 'annot_kws']}
-    heatmap_kwargs.update({
-        'vmin': -1, 
-        'vmax': 1, 
-        'center': 0, 
-        'square': True,
-        'linewidths': 1.0, 
-        'linecolor': 'black',
-        'cbar_kws': {"shrink": 1.0, "label": "", "format": "%.2f"}
-    })
-    
+    heatmap_kwargs = _heatmap_kwargs(kwargs, exclude=['annot', 'fmt', 'annot_kws'])
+
     # Draw the heatmap without annotations (we'll add custom text)
     sns.heatmap(display_matrix, annot=False, cmap=cmap, ax=ax, **heatmap_kwargs)
-    
+
     # Increase colorbar tick label size
-    cbar = ax.collections[0].colorbar
-    cbar.ax.tick_params(labelsize=cbar_fontsize)
+    _format_colorbar(ax, cbar_fontsize)
     
     # Set equal aspect ratio for square cells
     ax.set_aspect("equal")
@@ -498,16 +514,13 @@ def _plot_type3(corr_matrix, title, xlab, ylab, figsize, show,
     if 'cmap' not in kwargs:
         kwargs['cmap'] = 'RdBu'
     
-    heatmap_kwargs = {k: v for k, v in kwargs.items()}
-    heatmap_kwargs.update({'annot': False, 'vmin': -1, 'vmax': 1, 'center': 0,
-                           'square': True, 'linewidths': 1.0, 'linecolor': 'black',
-                           'cbar_kws': {"shrink": 1.0, "label": "", "format": "%.2f"}})
-    
+    heatmap_kwargs = _heatmap_kwargs(kwargs)
+    heatmap_kwargs['annot'] = False
+
     sns.heatmap(corr_matrix, ax=ax, **heatmap_kwargs)
-    
+
     # Increase colorbar tick label size
-    cbar = ax.collections[0].colorbar
-    cbar.ax.tick_params(labelsize=cbar_fontsize)
+    _format_colorbar(ax, cbar_fontsize)
     
     # Set equal aspect ratio for square cells
     ax.set_aspect("equal")
@@ -555,17 +568,13 @@ def _plot_type4(corr_matrix, title, xlab, ylab, figsize, show,
     cmap = sns.color_palette(cmap_name, as_cmap=True)
     
     # Setup kwargs for heatmap
-    heatmap_kwargs = {k: v for k, v in kwargs.items() if k not in ['annot', 'fmt']}
-    heatmap_kwargs.update({'vmin': -1, 'vmax': 1, 'center': 0, 'square': True,
-                           'linewidths': 1.0, 'linecolor': 'black',
-                           'cbar_kws': {"shrink": 1.0, "label": "", "format": "%.2f"}})
-    
+    heatmap_kwargs = _heatmap_kwargs(kwargs, exclude=['annot', 'fmt'])
+
     # Draw the heatmap without annotations (we'll add custom text)
     sns.heatmap(corr_matrix, annot=False, cmap=cmap, ax=ax, **heatmap_kwargs)
-    
+
     # Increase colorbar tick label size
-    cbar = ax.collections[0].colorbar
-    cbar.ax.tick_params(labelsize=cbar_fontsize)
+    _format_colorbar(ax, cbar_fontsize)
     
     # Set equal aspect ratio for square cells
     ax.set_aspect("equal")
